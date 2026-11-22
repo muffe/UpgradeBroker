@@ -1,5 +1,7 @@
 # Upgrade Broker
 
+![Upgrade Broker](docs/logo.png)
+
 Gear upgrade addon for WoW Forever. It scans the Auction House and rates gear against what your character wears as one percentage in the upgrade window, bags, quest rewards, and item tooltips.
 
 ## Features

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 100 100" role="img" aria-labelledby="title">
+  <title id="title">Upgrade Broker</title>
+  <rect x=".375" y=".375" width="99.25" height="99.25" rx="14" fill="#1a1714" stroke="#332b25" stroke-width=".75"/>
+  <path fill="#DCA77F" fill-rule="evenodd" d="
+    M22 20H44Q47 20 49 22L79 52Q83 56 79 60L59 80Q55 84 51 80L21 50Q19 48 19 45V23Q19 20 22 20Z
+    M35.1 31.5a4.6 4.6 0 1 0-9.2 0 4.6 4.6 0 1 0 9.2 0Z
+    M45 52L55 42Q56 41 57 42L67 52L62.5 56.5L59.5 53.5V66H52.5V53.5L49.5 56.5Z
+  "/>
+</svg>
