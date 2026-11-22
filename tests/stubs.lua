@@ -57,7 +57,9 @@ C_Item.GetItemInfoInstant = function(link)
 	if not d then return nil end
 	return 1, nil, nil, d.equipLoc
 end
+T.slow = {} -- links the "client" hasn't loaded yet
 C_Item.GetItemInfo = function(link)
+	if T.slow[link] then return nil end
 	local d = T.items[link]
 	if not d then return nil end
 	return d.name, link, d.quality or 2, d.ilvl or 30, d.reqLevel or 1, nil, nil, 1, d.equipLoc, 0, 100, d.classID, d.subclassID

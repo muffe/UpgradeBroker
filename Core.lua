@@ -231,6 +231,8 @@ SlashCmdList.UPGRADEBROKER = function(msg)
 	elseif msg:find("^item") or msg:find("|Hitem:") then
 		local link = msg:match("(|c.-|h|r)") or msg:match("(|Hitem:.-|h.-|h)")
 		if link and GL.Compare then GL.Compare:Explain(link) end
+	elseif msg == "why" then
+		GL.Scanner:Explain()
 	elseif msg:find("^forget ") then
 		local name = msg:match("^forget%s+(.+)$")
 		local saved = GL.Character:Forget(name)

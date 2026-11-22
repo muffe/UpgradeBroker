@@ -311,6 +311,35 @@ try("no realm name (WoW Forever): characters are still saved and listed", functi
 	assert(GL.db.chars["-Horde"] and GL.db.chars["-Horde"][UnitName("player")], "saved under -Horde")
 	GetRealmName = real
 end)
+try("items the client loads late are rated on later passes", function()
+	GL.db.maxPrice = 1e12
+	local slow = {}
+	for n = 1, 3 do
+		local id = 200 + n
+		add(id, { name = "Slow Gloves " .. n, equipLoc = "INVTYPE_HAND", classID = 4, subclassID = 1,
+			stats = { ITEM_MOD_STAMINA_SHORT = 5 + n, ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = 8 + n } }, 2000)
+		slow[replicate[#replicate].link] = true
+	end
+	T.Reset({ level = 35, class = "WARLOCK", className = "Warlock", stats = { 30, 35, 80, 110, 105 }, hp = 1300, mana = 1800,
+		spAll = 20, scrit = 6, armor = 420, regen = 14, regenIC = 0 })
+	GL:SetViewing(nil)
+	GL.Character:Invalidate(); GL.Compare:ClearCache()
+	for link in pairs(slow) do T.slow[link] = true end
+	GL.db.lastReplicate = 0
+	GL.Scanner.state = "idle"
+	assert(GL.Scanner:Start()); GL:Fire("REPLICATE_ITEM_LIST_UPDATE")
+	-- the client delivers one item per pass
+	for link in pairs(slow) do
+		T.slow[link] = nil
+		T.RunLater()
+	end
+	T.RunLater()
+	local hands = GL.Scanner.results and GL.Scanner.results.HANDS or {}
+	local n = 0
+	for _, e in ipairs(hands) do if e.item.name:find("^Slow Gloves") then n = n + 1 end end
+	assert(n == 3, "rated " .. n .. " of 3 late items")
+	GL.Scanner:Explain()
+end)
 try("auction house closes", function() GL:Fire("AUCTION_HOUSE_CLOSED") end)
 try("debug dump", function() GL.Character:Dump() end)
 try("explain", function() GL.Compare:Explain(res.CHEST[1].link) end)

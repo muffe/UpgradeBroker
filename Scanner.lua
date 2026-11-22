@@ -211,6 +211,18 @@ Scanner.GROUP_OF = GROUP_OF
 
 Scanner.results = nil -- [groupKey] = { entries sorted best first }
 
+-- /ub why: what the last rating did with the scanned items
+function Scanner:Explain()
+	local st = self.lastStats
+	if not st then return GL:Print("No rating yet. Scan the Auction House first.") end
+	local unusable, parts = 0, {}
+	for reason, n in pairs(st.unusable) do unusable = unusable + n; parts[#parts + 1] = ("%s %d"):format(reason, n) end
+	GL:Print(("%d items under your max price: %d upgrades, %d below %s, %d can't be used (%s), %d still loading."):format(
+		st.priced, st.upgrades, st.small, GL.Pct(GL.db.minGain), unusable, table.concat(parts, ", "), st.missing))
+	table.sort(st.near, function(a, b) return a.gain > b.gain end)
+	for k = 1, math.min(5, #st.near) do GL:Print(("  %s %s"):format(st.near[k].link, GL.Pct(st.near[k].gain))) end
+end
+
 -- stops a rating that is still running (its results would belong to another character)
 function Scanner:CancelRating()
 	ratingRun = ratingRun + 1
@@ -267,6 +279,7 @@ function Scanner:Rate()
 	local keys = {}
 	for key in pairs(data.items) do keys[#keys + 1] = key end
 	local out, missing, i = {}, 0, 0
+	local stats = { priced = 0, missing = 0, unusable = {}, small = 0, upgrades = 0, near = {} }
 	local maxPrice = GL.db.maxPrice
 	SetState("rating", 0)
 	local function step()
@@ -278,9 +291,19 @@ function Scanner:Rate()
 			price = tonumber(price)
 			if price and price <= maxPrice then
 				local res = GL.Compare:Rate(link, who)
+				stats.priced = stats.priced + 1
 				if not res then
 					missing = missing + 1
-				elseif GL.Compare.IsUpgrade(res) then
+				elseif not res.ok then
+					stats.unusable[res.reason or "?"] = (stats.unusable[res.reason or "?"] or 0) + 1
+				elseif not GL.Compare.IsUpgrade(res) then
+					stats.small = stats.small + 1
+					if res.gain and res.gain.total > 0 then
+						table.insert(stats.near, { link = link, gain = res.gain.total })
+					end
+				end
+				if res and GL.Compare.IsUpgrade(res) then
+					stats.upgrades = stats.upgrades + 1
 					local g = GROUP_OF[res.slot]
 					if g then
 						out[g] = out[g] or {}
@@ -297,10 +320,16 @@ function Scanner:Rate()
 			self.results = out
 			SetState("idle")
 			self:Sort()
-			-- items the client was still loading: rate again once they are in
-			if missing > 0 and not self.retry then
+			stats.missing = missing
+			self.lastStats = stats
+			-- items the client was still loading: rate again while it keeps delivering them (a full scan can
+			-- hold thousands the client has never seen; one retry left most of them out)
+			if missing > 0 and not self.retry and missing < (self.lastMissing or math.huge) then
 				self.retry = true
+				self.lastMissing = missing
 				C_Timer.After(3, function() self.retry = false; if run == ratingRun then self:Rate() end end)
+			else
+				self.lastMissing = nil
 			end
 		end
 	end
