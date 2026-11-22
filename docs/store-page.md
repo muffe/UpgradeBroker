@@ -21,6 +21,8 @@ Upgrade Broker scans the Auction House on WoW Forever and rates gear against wha
 
 ### How scores work
 
+![Upgrade Broker in an item tooltip](https://raw.githubusercontent.com/muffe/UpgradeBroker/main/docs/tooltip.png)
+
 Every item gets one percentage showing how much stronger the character gets.
 
 - **Leveling:** Mostly more kills per hour from a kill cycle (fighting, walking, eating and drinking, sitting down) using WoW Forever game data (mob health and damage per level, food and water, main spell ranks), plus a small share for survival.

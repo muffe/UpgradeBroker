@@ -20,6 +20,8 @@ Gear upgrade addon for WoW Forever. It scans the Auction House and rates gear ag
 
 ## How scores work
 
+![Upgrade Broker in an item tooltip](docs/tooltip.png)
+
 Each item gets one percentage showing how much stronger the character gets.
 
 - **Leveling:** Mostly more kills per hour from a kill cycle (fighting, walking, eating and drinking, sitting down) built on WoW Forever game data (mob health and damage per level, food and water, main spell ranks), plus a small share for survival.
