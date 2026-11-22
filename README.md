@@ -56,7 +56,7 @@ python3 tools/gen_leveling.py <csv-folder> Data/Leveling.lua
 
 ### Releases
 
-Push a version tag such as `v0.1.0`. GitHub Actions runs the tests and uses the BigWigs packager to upload the release to CurseForge, Wago, and GitHub.
+Push a version tag such as `v0.1.0`. GitHub Actions runs the tests and uses the BigWigs packager to upload the release to CurseForge and GitHub.
 
 ## Credits
 
