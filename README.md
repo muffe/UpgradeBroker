@@ -4,6 +4,8 @@
 
 Gear upgrade addon for WoW Forever. It scans the Auction House and rates gear against what your character wears as one percentage in the upgrade window, bags, quest rewards, and item tooltips.
 
+![Upgrade Broker in the auction house](docs/screenshot.png)
+
 ## Features
 
 - Scans the Auction House with its own full scan or reads Auctionator's full scan, keeps the cheapest buyout per item variant, and lists the best upgrade per slot with price.

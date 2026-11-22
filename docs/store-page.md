@@ -6,6 +6,8 @@ Finds WoW Forever gear upgrades on the Auction House and rates items as one perc
 
 Upgrade Broker scans the Auction House on WoW Forever and rates gear against what your character wears as one percentage. It lists the best upgrade per slot with price and shows upgrade ratings in bags, on quest rewards, and in item tooltips.
 
+![Upgrade Broker in the auction house](https://raw.githubusercontent.com/muffe/UpgradeBroker/main/docs/screenshot.png)
+
 ### Features
 
 - **Auction House upgrades:** Runs its own full scan or reads Auctionator's full scan, keeps the cheapest buyout per item variant, and lists the best upgrade per slot with price.
