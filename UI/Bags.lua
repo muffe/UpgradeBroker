@@ -97,8 +97,14 @@ GL:On("GL_CHANGED", function()
 	soon = true
 	C_Timer.After(0.3, function() soon = false; Bags:Refresh() end)
 end)
+-- items arrive by the thousand after a scan; repaint open bags at most every two seconds
+local function AnyBagOpen()
+	for _, fr in ipairs(BlizzFrames()) do if fr:IsShown() then return true end end
+	local eui = _G.EUI_Bags
+	return eui and eui.IsVisible and eui:IsVisible() or false
+end
 GL:On("GL_ITEM_LOADED", function()
-	if soon then return end
+	if soon or not AnyBagOpen() then return end
 	soon = true
-	C_Timer.After(0.5, function() soon = false; Bags:Refresh() end)
+	C_Timer.After(2, function() soon = false; Bags:Refresh() end)
 end)

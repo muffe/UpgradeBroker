@@ -7,7 +7,8 @@ GL.Scanner = Scanner
 
 local AH = C_AuctionHouse
 local COOLDOWN = 15 * 60
-local BATCH_MS = 8
+-- time per frame for reading and rating: small enough that a 144 Hz frame (7 ms) keeps its pace
+local BATCH_MS = 2
 
 Scanner.state = "idle" -- idle | waiting | reading | rating
 Scanner.progress = 0
@@ -66,9 +67,16 @@ local function KeyOf(link)
 end
 Scanner.KeyOf = KeyOf
 
+-- the window follows the progress four times a second, not every frame
+local lastFire = 0
 local function SetState(state, progress)
+	local changed = state ~= Scanner.state
 	Scanner.state, Scanner.progress = state, progress or 0
-	GL:Fire("GL_SCAN_STATE")
+	local now = GetTime()
+	if changed or now - lastFire >= 0.25 then
+		lastFire = now
+		GL:Fire("GL_SCAN_STATE")
+	end
 end
 
 function Scanner:Start()
