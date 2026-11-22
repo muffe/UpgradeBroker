@@ -363,7 +363,7 @@ function T.DeltaBar(parent, w)
 	bar:SetTexture(WHITE)
 	bar:SetHeight(6)
 	function f:SetValue(v, scale)
-		local half = w / 2
+		local half = (self:GetWidth() > 0 and self:GetWidth() or w) / 2
 		local len = math.min(half, math.abs(v) / math.max(scale, 0.001) * half)
 		bar:ClearAllPoints()
 		if len < 0.5 then bar:Hide() return end

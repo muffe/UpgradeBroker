@@ -100,9 +100,10 @@ function GL.Seconds(v)
 end
 
 -- "+4.8%", "+0.6%", "-1.2%" (one decimal; whole numbers from 10 up)
-function GL.Pct(p, signed)
-	if math.abs(p) < 0.05 then return "0%" end
-	local s = math.abs(p) >= 9.95 and ("%.0f"):format(p) or ("%.1f"):format(p)
+-- decimals: 2 to tell apart neighbours that look equal with one (+0.72% / +0.68%)
+function GL.Pct(p, signed, decimals)
+	if math.abs(p) < (decimals == 2 and 0.005 or 0.05) then return "0%" end
+	local s = math.abs(p) >= 9.95 and ("%.0f"):format(p) or (decimals == 2 and ("%.2f"):format(p) or ("%.1f"):format(p))
 	if signed ~= false and p > 0 then s = "+" .. s end
 	return (s:gsub("^%-", "\226\136\146")) .. "%" -- a real minus sign
 end

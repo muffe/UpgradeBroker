@@ -10,7 +10,7 @@ local C = T.C
 local Scanner = GL.Scanner
 
 local f
-local LEFT_W, TOP_H = 330, 40
+local LEFT_W, TOP_H = 370, 40
 local rows, candRows = {}, {}
 local selectedGroup, selectedLink, candOffset = nil, nil, 0
 
@@ -165,6 +165,7 @@ local function Build()
 
 	local title = T.Text(top, 15, C.text, true)
 	title:SetPoint("LEFT", 14, 0)
+	f.title = title
 	T.OnAccent(function() title:SetText("Upgrade " .. T.Hex(C.accent) .. "Broker|r") end)
 
 	-- whose upgrades: you, or another character you have logged in on (same realm and faction)
@@ -360,11 +361,14 @@ local function Build()
 	why.big:SetPoint("TOPLEFT", 16, -18)
 	why.metric = T.Text(why, 12, C.dim)
 	why.metric:SetPoint("TOPLEFT", why.big, "TOPRIGHT", 10, -3)
-	why.metric:SetPoint("RIGHT", why, "RIGHT", -200, 0)
+	why.metric:SetPoint("RIGHT", why, "RIGHT", -176, 0)
+	-- two lines when needed ("Needs level 37 (Hex is 35)" on the narrow auction house view)
+	why.metric:SetWordWrap(true)
+	if why.metric.SetMaxLines then why.metric:SetMaxLines(2) end
 	why.vs = T.Text(why, 11.5, C.sec)
 	why.vs:SetPoint("TOPLEFT", why.metric, "BOTTOMLEFT", 0, -3)
-	why.vs:SetPoint("RIGHT", why, "RIGHT", -200, 0)
-	why.find = T.Button(why, "Search Auction House", 170, 28)
+	why.vs:SetPoint("RIGHT", why, "RIGHT", -176, 0)
+	why.find = T.Button(why, "Search Auction House", 150, 28)
 	why.find:SetPrimary(true)
 	why.find:SetPoint("TOPRIGHT", -16, -18)
 	why.find:SetScript("OnClick", function()
@@ -377,11 +381,14 @@ local function Build()
 		b.label = T.Text(why, 12, C.dim)
 		b.label:SetPoint("TOPLEFT", 16, -70 - (i - 1) * 22)
 		b.label:SetWidth(80)
-		b.bar = T.DeltaBar(why, 260)
+		b.bar = T.DeltaBar(why, 220)
 		b.bar:SetPoint("LEFT", b.label, "RIGHT", 6, 0)
 		b.value = T.Text(why, 12.5, C.up, true)
-		b.value:SetPoint("LEFT", b.bar, "RIGHT", 10, 0)
+		b.value:SetPoint("RIGHT", why, "RIGHT", -16, 0)
+		b.value:SetPoint("TOP", b.label, "TOP", 0, 0)
 		b.value:SetWidth(60); b.value:SetJustifyH("RIGHT")
+		-- the bar fills the room between label and value, so values line up with the button above
+		b.bar:SetPoint("RIGHT", b.value, "LEFT", -10, 0)
 		b.key = key
 		-- a text row in place of a bar ("fighting -0.5 s, resting -0.2 s")
 		b.wide = T.Text(why, 12, C.dim)
@@ -400,10 +407,9 @@ local function Build()
 		local col, row = (i - 1) % 2, math.floor((i - 1) / 2)
 		local name = T.Text(why.statsHolder, 12, C.dim)
 		local pct = T.Text(why.statsHolder, 12, C.up, true)
-		pct:SetJustifyH("RIGHT"); pct:SetWidth(48)
-		name:SetPoint("TOPLEFT", col * 218, -row * 17)
-		pct:SetPoint("TOPLEFT", col * 218 + 152, -row * 17)
-		name:SetWidth(148)
+		pct:SetJustifyH("LEFT"); pct:SetWidth(52)
+		name:SetPoint("TOPLEFT", col * 195, -row * 17)
+		name:SetWidth(132)
 		why.stats[i] = { name = name, pct = pct }
 	end
 	why.note = T.Text(why, 11.5, C.sec)
@@ -455,8 +461,8 @@ local function Age(sec)
 	return ("%dd ago"):format(sec / 86400)
 end
 
-local function SetGainText(fs, gain, later)
-	fs:SetText(GL.Pct(gain))
+local function SetGainText(fs, gain, later, decimals)
+	fs:SetText(GL.Pct(gain, nil, decimals))
 	T.Color(fs, T.GainColor(gain, later))
 end
 
@@ -486,6 +492,10 @@ local function FillHeader()
 	-- the scan only asks for attention when there is nothing recent to show
 	f.scan:SetPrimary(can and (not age or age > 2 * 3600))
 	f.close:SetShown(not f.inAH)
+	-- in the auction house its title bar already says Upgrade Broker
+	f.title:SetShown(not f.inAH)
+	f.who:ClearAllPoints()
+	if f.inAH then f.who:SetPoint("LEFT", f.top, "LEFT", 14, 0) else f.who:SetPoint("LEFT", f.title, "RIGHT", 14, 0) end
 	f.scan:ClearAllPoints()
 	if f.inAH then f.scan:SetPoint("RIGHT", f.top, "RIGHT", -12, 0) else f.scan:SetPoint("RIGHT", f.close, "LEFT", -8, 0) end
 end
@@ -513,7 +523,7 @@ local function FillList()
 		if e then
 			T.Color(r.slot, C.dim)
 			r.icon:Show(); r.icon:SetItem(e.item)
-			r.lvl:SetText(e.later and tostring(e.item.reqLevel) or "")
+			r.lvl:SetText(e.later and ("L" .. e.item.reqLevel) or "")
 			r.name:SetText(e.item.name)
 			SetGainText(r.gain, e.gain, e.later)
 			r.price:SetText(GL.MoneyShort(e.price))
@@ -627,7 +637,13 @@ local function FillDetail()
 			r.icon:SetItem(c.item)
 			r.name:SetText(c.item.name)
 			r.tag:SetText(c.later and ("Level " .. c.item.reqLevel) or "")
-			SetGainText(r.gain, c.gain, c.later)
+			-- a second decimal where neighbours would otherwise look the same (+0.7% / +0.7%)
+			local two = false
+			for _, j in ipairs({ idx - 1, idx + 1 }) do
+				local n = list[j]
+				if n and GL.Pct(n.gain) == GL.Pct(c.gain) and GL.Pct(n.gain, nil, 2) ~= GL.Pct(c.gain, nil, 2) then two = true end
+			end
+			SetGainText(r.gain, c.gain, c.later, two and 2 or nil)
 			r.price:SetText(GL.Money(c.price))
 			r.selected = idx == selectedIndex
 			r.hl:SetVertexColor(a[1], a[2], a[3], r.selected and 0.10 or 0)
@@ -673,7 +689,8 @@ local function FillDetail()
 	if first and e.res.perSlot then vs = "Replaces " .. e.res.label .. ": " .. ReplacedText(e) end
 	-- two items go out (a two-hander for main and off hand): their names are in the row above
 	if #replaced > 1 then vs = "Replaces both hands" end
-	w.vs:SetText(vs)
+	-- the header above already marks what goes out; say only when the slot is empty
+	w.vs:SetText(first and "" or vs)
 	w.find:SetEnabled(Scanner.ahOpen == true)
 	w.find:SetPrimary(not e.later) -- not the obvious next step for gear you can't wear yet
 	w.find:SetLabel(Scanner.ahOpen and "Search Auction House" or "Requires Auction House")
@@ -687,14 +704,20 @@ local function FillDetail()
 		local rows = {
 			{ "Kills/hour", nil, kills },
 			{ "Survival", nil, g.surv },
-			{ "Per kill", ("Fighting %s, resting %s"):format(GL.Seconds(fight), GL.Seconds(rest)) },
+			{ "Per kill", nil },
 		}
+		-- only the time changes that show after rounding
+		local times = {}
+		if math.abs(fight) >= 0.05 then times[#times + 1] = "Fighting " .. GL.Seconds(fight) end
+		if math.abs(rest) >= 0.05 then times[#times + 1] = (#times > 0 and "resting " or "Resting ") .. GL.Seconds(rest) end
+		rows[3][2] = #times > 0 and table.concat(times, ", ") or nil
 		for i, b in ipairs(w.bars) do
 			local r = rows[i]
-			b.label:Show(); b.label:SetText(r[1])
-			b.wide:SetShown(r[2] ~= nil); b.bar:SetShown(r[2] == nil); b.value:SetShown(r[2] == nil)
-			if r[2] then
-				b.wide:SetText(r[2])
+			local timeRow = i == 3
+			b.label:SetShown(not timeRow or r[2] ~= nil); b.label:SetText(r[1])
+			b.wide:SetShown(timeRow and r[2] ~= nil); b.bar:SetShown(not timeRow); b.value:SetShown(not timeRow)
+			if timeRow then
+				b.wide:SetText(r[2] or "")
 			else
 				b.bar:SetValue(r[3], math.max(2, math.abs(kills), math.abs(g.surv)))
 				b.value:SetText(GL.Pct(r[3]))
@@ -727,7 +750,10 @@ local function FillDetail()
 	w.statsHolder:ClearAllPoints()
 	w.statsHolder:SetPoint("TOPLEFT", 16, threeRows and -142 or -120)
 	w.statsHolder:SetPoint("RIGHT", -16, 0)
-	local list = GL.Compare.TopRows(GL.Compare.Contributions(e.res), #w.stats)
+	-- only stats that move the score
+	local moved = {}
+	for _, d in ipairs(GL.Compare.Contributions(e.res)) do if math.abs(d.pct or 0) >= 0.05 then moved[#moved + 1] = d end end
+	local list = GL.Compare.TopRows(moved, #w.stats)
 	w.statsHolder:SetHeight(math.max(1, math.ceil(math.min(#list, #w.stats) / 2)) * 17)
 	for i, cell in ipairs(w.stats) do
 		local d = list[i]
@@ -735,7 +761,9 @@ local function FillDetail()
 			local text = GL.Compare.FormatStat(d)
 			local p = d.pct or 0
 			cell.name:SetText(text)
-			cell.pct:SetText(math.abs(p) < 0.05 and "0%" or GL.Pct(p))
+			cell.pct:ClearAllPoints()
+			cell.pct:SetPoint("LEFT", cell.name, "LEFT", math.min(132, cell.name:GetStringWidth()) + 8, 0)
+			cell.pct:SetText(GL.Pct(p))
 			local c = math.abs(p) < 0.05 and C.sec or (p > 0 and C.up or C.down)
 			T.Color(cell.pct, c)
 			T.Color(cell.name, math.abs(p) < 0.05 and C.sec or C.dim)

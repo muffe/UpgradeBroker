@@ -47,7 +47,11 @@ local function Add(tip, res)
 	if g.cycle then
 		local c0, c1 = g.cycle0, g.cycle
 		local fight, rest = c1.fight - c0.fight, (c1.rest + c1.stops) - (c0.rest + c0.stops)
-		tip:AddLine(Hex(C.sec) .. "Per kill: fighting " .. GL.Seconds(fight) .. ", resting " .. GL.Seconds(rest) .. "|r")
+		-- only the time changes that show after rounding
+		local times = {}
+		if math.abs(fight) >= 0.05 then times[#times + 1] = "fighting " .. GL.Seconds(fight) end
+		if math.abs(rest) >= 0.05 then times[#times + 1] = "resting " .. GL.Seconds(rest) end
+		if #times > 0 then tip:AddLine(Hex(C.sec) .. "Per kill: " .. table.concat(times, ", ") .. "|r") end
 	end
 	if res.perSlot then
 		for _, e in ipairs(res.perSlot) do

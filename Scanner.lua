@@ -242,7 +242,8 @@ local function Better(order)
 	return function(a, b)
 		if a.later ~= b.later then return not a.later end
 		if order == "gain" then
-			if a.gain ~= b.gain then return a.gain > b.gain end
+			-- upgrades within 0.05 % of each other count as equal: the cheaper one first
+			if math.abs(a.gain - b.gain) >= 0.05 then return a.gain > b.gain end
 			return a.price < b.price
 		end
 		if a.perGold ~= b.perGold then return a.perGold > b.perGold end
