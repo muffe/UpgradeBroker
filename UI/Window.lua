@@ -531,15 +531,20 @@ local function FillList()
 			r.lvl:SetText(e.later and ("L" .. e.item.reqLevel) or "")
 			r.name:SetText(e.item.name)
 			SetGainText(r.gain, e.gain, e.later)
+			r.price:SetWidth(40)
 			r.price:SetText(GL.MoneyShort(e.price))
+			T.Color(r.price, C.dim)
 			r:Enable()
 		elseif over then
-			-- nothing within your limit: where upgrades start, quiet, so the limit still reads as the rule
-			T.Color(r.slot, C.dim)
+			-- nothing within your limit: where upgrades start, quiet and in the price column, so the upgrades
+			-- within the limit stay the focus; the row can still be selected
+			T.Color(r.slot, C.sec)
 			r.icon:Hide()
-			r.name:SetText(T.Hex(C.sec) .. "from " .. GL.MoneyShort(over.price, true) .. "|r")
+			r.name:SetText("")
 			r.gain:SetText("")
-			r.price:SetText("")
+			r.price:SetWidth(96) -- the empty upgrade column gives it room
+			r.price:SetText("from " .. GL.MoneyShort(over.price, true))
+			T.Color(r.price, C.sec)
 			r:Enable()
 		else
 			T.Color(r.slot, C.sec)

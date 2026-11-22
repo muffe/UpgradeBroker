@@ -42,7 +42,13 @@ local function AccentChanged()
 	for _, fn in ipairs(accentWatchers) do pcall(fn, unpack(T.C.accent)) end
 end
 
-function T.Hex(c) return ("|cff%02x%02x%02x"):format(c[1] * 255, c[2] * 255, c[3] * 255) end
+-- Inline color codes have no alpha: a color with alpha (the dim and secondary text whites) is mixed with the
+-- dark background first, so "secondary" stays grey in tooltips and inline text too.
+function T.Hex(c)
+	local a, bg = c[4] or 1, 0.067
+	local function ch(v) return math.floor((v * a + bg * (1 - a)) * 255 + 0.5) end
+	return ("|cff%02x%02x%02x"):format(ch(c[1]), ch(c[2]), ch(c[3]))
+end
 
 if EllesmereUI and EllesmereUI.RegisterSkin then
 	EllesmereUI.RegisterSkin(GL.name, function(S)
