@@ -1,0 +1,325 @@
+-- Compare.lua: what an item would replace, whether you can use it, and how much stronger it makes you.
+local _, GL = ...
+
+local Compare = {}
+GL.Compare = Compare
+
+local Items, Model = GL.Items, GL.Model
+
+local SLOT_NAMES = {
+	[1] = "Head", [2] = "Neck", [3] = "Shoulder", [5] = "Chest", [6] = "Waist", [7] = "Legs", [8] = "Feet",
+	[9] = "Wrist", [10] = "Hands", [11] = "Ring 1", [12] = "Ring 2", [13] = "Trinket 1", [14] = "Trinket 2",
+	[15] = "Back", [16] = "Main Hand", [17] = "Off Hand", [18] = "Ranged",
+}
+Compare.SLOT_NAMES = SLOT_NAMES
+
+local caches = setmetatable({}, { __mode = "k" }) -- [snapshot] = { [link] = result }
+function Compare:ClearCache() caches = setmetatable({}, { __mode = "k" }) end
+
+---------------------------------------------------------------------------
+-- Can you use it?
+---------------------------------------------------------------------------
+-- Returns ok, reason. reason "later" = you can wear it within the levels you look ahead (ok is true then).
+function Compare.CanUse(s, item)
+	local C = GL.Classes
+	-- red tooltip lines describe the character you play, not an alt
+	if item.blocked and not s.isAlt then return false, "blocked" end
+	-- a profession item (goggles, fishing poles): only with that profession at that rank
+	if item.skillReq then
+		local have = s.skills and s.skills[item.skillReq.name]
+		if not have or have < item.skillReq.rank then return false, "skill" end
+	end
+	if item.classes then
+		local name = s.classLocal or UnitClass("player")
+		if name and not item.classes:find(name:lower(), 1, true) then return false, "class" end
+	end
+	local need = item.reqLevel or 0
+	local later = need > s.level
+	if later and need - s.level > (GL.db and GL.db.levelsAhead or 3) then return false, "level" end
+	local wearLevel = math.max(s.level, need)
+	if item.classID == 4 then
+		local sub = item.subclassID or 0
+		if sub > 0 then
+			if not C.armor[s.class][sub] then return false, "armor" end
+			if sub <= 4 then
+				if C.ArmorLearnLevel(s.class, sub) > wearLevel then return false, "armor" end
+				if GL.db and GL.db.ownArmorOnly and item.equipLoc ~= "INVTYPE_CLOAK" and sub ~= C.MainArmor(s.class, wearLevel) then
+					return false, "armor"
+				end
+			end
+		end
+	elseif item.classID == 2 then
+		if not C.weapons[s.class][item.subclassID or -1] then return false, "weapon" end
+		if item.kind == "ohw" and not s.canDualWield then return false, "weapon" end
+	end
+	return true, later and "later" or nil
+end
+
+---------------------------------------------------------------------------
+-- What goes where
+---------------------------------------------------------------------------
+local function W(item) return GL.Character.Weapon(item) end
+
+-- Weapons and off hands in your bags, for "a one-hander needs something in the other hand".
+local function BagWeapons(s)
+	local list = {}
+	if s.isAlt then
+		for _, link in ipairs(s.bagWeaponLinks or {}) do
+			local item = Items.Get(link)
+			local ok, why
+			if item then ok, why = Compare.CanUse(s, item) end
+			if ok and why ~= "later" then list[#list + 1] = item end
+		end
+		return list
+	end
+	local numSlots = C_Container and C_Container.GetContainerNumSlots
+	local getLink = C_Container and C_Container.GetContainerItemLink
+	if not (numSlots and getLink) then return list end
+	for bag = 0, (NUM_BAG_SLOTS or 4) do
+		for slot = 1, numSlots(bag) or 0 do
+			local item = Items.Get(getLink(bag, slot))
+			if item and item.slots and (item.slots[1] == 16 or item.slots[1] == 17) and Compare.CanUse(s, item) then
+				local _, why = Compare.CanUse(s, item)
+				if why ~= "later" then list[#list + 1] = item end
+			end
+		end
+	end
+	return list
+end
+
+-- Every way to put the item on: { slot, label, add = {...}, remove = {...}, weapons = {...} }.
+local function Options(s, item)
+	local eq, kind, out = s.equipped, item.kind, {}
+	local function opt(slot, add, remove, weapons, label)
+		out[#out + 1] = { slot = slot, add = add, remove = remove, weapons = weapons, label = label or SLOT_NAMES[slot] }
+	end
+	local function sameUnique(slot) return item.unique and eq[slot] and eq[slot].id == item.id end
+
+	if kind == nil or kind == "relic" or kind == "ranged" then
+		local slots = item.slots
+		if #slots == 2 then
+			local a, b = slots[1], slots[2]
+			-- a unique item you already wear in one slot can only replace that copy
+			if sameUnique(a) then slots = { a } elseif sameUnique(b) then slots = { b } end
+		end
+		for _, slot in ipairs(slots) do
+			opt(slot, { item }, { eq[slot] }, kind == "ranged" and { ranged = W(item) } or nil)
+		end
+		return out
+	end
+
+	local mh, oh = eq[16], eq[17]
+	local twoHanded = mh and mh.kind == "2h"
+	if kind == "2h" then
+		opt(16, { item }, { mh, oh }, { mh = W(item), oh = false }, oh and "Main + Off Hand" or "Main Hand")
+		return out
+	end
+	if kind == "1h" or kind == "mh" then
+		if twoHanded then
+			-- swapping a two-hander for a one-hander: the best off hand from your bags goes with it
+			opt(16, { item }, { mh }, { mh = W(item), oh = false }, "Main Hand")
+			for _, other in ipairs(BagWeapons(s)) do
+				local ok = other.kind == "shield" or other.kind == "held"
+					or ((other.kind == "1h" or other.kind == "ohw") and s.canDualWield)
+				if ok and other ~= item then
+					opt(16, { item, other }, { mh }, { mh = W(item), oh = (other.kind == "1h" or other.kind == "ohw") and W(other) or false },
+						"Main Hand")
+				end
+			end
+		elseif not sameUnique(17) then
+			opt(16, { item }, { mh }, { mh = W(item) })
+		end
+		if kind == "1h" and s.canDualWield and not twoHanded and not sameUnique(16) then
+			opt(17, { item }, { oh }, { oh = W(item) })
+		end
+		return out
+	end
+	-- off hand: shield, held item or off-hand weapon
+	local ohWeapon = (kind == "ohw") and W(item) or false
+	if twoHanded then
+		for _, other in ipairs(BagWeapons(s)) do
+			if other.kind == "1h" or other.kind == "mh" then
+				opt(17, { item, other }, { mh }, { mh = W(other), oh = ohWeapon }, "Off Hand")
+			end
+		end
+	else
+		opt(17, { item }, { oh }, { oh = ohWeapon })
+	end
+	return out
+end
+
+---------------------------------------------------------------------------
+-- Rating
+---------------------------------------------------------------------------
+-- Result: { item, ok, reason, gain = Model.Gain of the best option, slot, label, replaced = {items},
+-- perSlot = { { label, gain, replaced } } for items with two places }. nil while the item is loading.
+-- s: whose gear to compare with (Character:Viewed() for an alt); your own character when left out.
+function Compare:Rate(link, s)
+	s = s or GL.Character:Get()
+	-- gear still loading: no rating rather than one against half your gear
+	if not s or s.incomplete then return nil end
+	local item = Items.Get(link)
+	if not item then return nil end
+	local cache = caches[s]
+	if not cache then cache = {}; caches[s] = cache end
+	local key = link
+	local hit = cache[key]
+	if hit then return hit end
+	local ok, reason = Compare.CanUse(s, item)
+	local res = { item = item, ok = ok, reason = reason, snap = s }
+	if ok then
+		local x0 = Model.Calibrate(s).x0
+		local best, perSlot = nil, {}
+		for _, o in ipairs(Options(s, item)) do
+			local removes = {}
+			for _, r in pairs(o.remove) do if r then removes[#removes + 1] = r end end
+			local x = Model.Apply(s, x0, o.add, removes, o.weapons)
+			local g = Model.Gain(s, x)
+			-- wearing the very same item already: no change
+			if #removes == 1 and removes[1].link == item.link then g.total, g.dmg, g.surv, g.sus = 0, 0, 0, 0 end
+			local entry = { slot = o.slot, label = o.label, gain = g, replaced = removes, with = o.add, weapons = o.weapons }
+			if not perSlot[o.slot] or g.total > perSlot[o.slot].gain.total then perSlot[o.slot] = entry end
+			if not best or g.total > best.gain.total then best = entry end
+		end
+		if best then
+			res.gain, res.slot, res.label, res.replaced, res.with, res.weapons = best.gain, best.slot, best.label, best.replaced, best.with, best.weapons
+			local list = {}
+			for _, e in pairs(perSlot) do list[#list + 1] = e end
+			table.sort(list, function(a, b) return a.slot < b.slot end)
+			if #list > 1 then res.perSlot = list end
+		else
+			res.ok, res.reason = false, "slot"
+		end
+	end
+	cache[key] = res
+	return res
+end
+
+-- Is it worth calling an upgrade?
+function Compare.IsUpgrade(res)
+	return res and res.ok and res.gain and res.gain.total >= ((GL.db and GL.db.minGain) or 0.5)
+end
+
+-- The stats that change: { { key, delta } }, biggest change in value first is not knowable per stat,
+-- so: percent stats and weapon DPS first, then by size.
+function Compare.StatDiff(res)
+	local d = {}
+	for _, it in ipairs(res.with or { res.item }) do
+		for k, v in pairs(it.stats) do if k ~= "SPEED" then d[k] = (d[k] or 0) + v end end
+	end
+	for _, it in ipairs(res.replaced or {}) do
+		for k, v in pairs(it.stats) do if k ~= "SPEED" then d[k] = (d[k] or 0) - v end end
+	end
+	local list = {}
+	for k, v in pairs(d) do
+		if math.abs(v) >= 0.05 and Items.LABELS[k] then list[#list + 1] = { key = k, delta = v } end
+	end
+	local rank = function(e) return (Items.PERCENT[e.key] and 10 or 1) * math.abs(e.delta) * (e.key == "ARMOR" and 0.05 or 1) end
+	table.sort(list, function(a, b) return rank(a) > rank(b) end)
+	return list
+end
+
+-- Why an item is better: what each changed stat adds on its own, scaled so the parts add up to the total.
+-- Returns the StatDiff list with .pct on every entry, biggest effect first. The weapon swap itself (its
+-- damage per second) counts as the "DPS" entry.
+function Compare.Contributions(res)
+	if res.contrib then return res.contrib end
+	local s = res.snap or GL.Character:Get()
+	if not (s and res.ok and res.gain) then return Compare.StatDiff(res) end
+	local x0 = Model.Calibrate(s).x0
+	local list = {}
+	-- the weapon swap itself (weapon damage, a second hand, a shield), apart from the stats on the weapons
+	-- first the loadout change itself (weapon damage, one or two hands, a shield and its block), with the items'
+	-- stats left out; then each stat on top of that loadout
+	local function bare(items)
+		local t = {}
+		for _, it in ipairs(items or {}) do t[#t + 1] = { kind = it.kind, stats = {} } end
+		return t
+	end
+	local xw = Model.Apply(s, x0, bare(res.with), bare(res.replaced), res.weapons)
+	local gw = Model.Gain(s, xw).total
+	local dps = 0
+	for _, it in ipairs(res.with or {}) do dps = dps + (it.stats.DPS or 0) end
+	for _, it in ipairs(res.replaced or {}) do dps = dps - (it.stats.DPS or 0) end
+	local shieldChange = (xw.shield and true or false) ~= (x0.shield and true or false)
+	if math.abs(gw) >= 0.05 then
+		local twoHands = #(res.replaced or {}) > 1 or #(res.with or {}) > 1
+		local text
+		-- a shield on or off on its own is "Shield block" / "No shield"; with weapon damage changing too it is
+		-- all one weapon swap (a two-hander for sword and board)
+		if shieldChange and math.abs(dps) < 0.05 and not twoHands then text = xw.shield and "Shield block" or "No shield block"
+		elseif shieldChange or twoHands or math.abs(dps) < 0.05 then text = "Weapon swap" end
+		list[#list + 1] = { key = "DPS", delta = dps, pct = gw, text = text }
+	end
+	local sum = gw
+	for _, e in ipairs(Compare.StatDiff(res)) do
+		if e.key ~= "DPS" then
+			local x = Model.Apply(s, xw, { { stats = { [e.key] = e.delta } } }, {})
+			e.pct = Model.Gain(s, x).total - gw
+			sum = sum + e.pct
+			list[#list + 1] = e
+		end
+	end
+	-- stats work together (crit is worth more with more spell damage): when the parts point the same way as the
+	-- total, they are scaled to add up to it; otherwise what is left shows as its own line
+	local total = res.gain.total
+	if math.abs(sum) > 0.01 and sum * total > 0 then
+		for _, e in ipairs(list) do e.pct = e.pct * total / sum end
+	elseif math.abs(total - sum) >= 0.1 then
+		list[#list + 1] = { key = "COMBINED", delta = 0, pct = total - sum, text = "Combined effect" }
+	end
+	table.sort(list, function(a, b) return math.abs(a.pct) > math.abs(b.pct) end)
+	res.contrib = list
+	return list
+end
+
+-- At most n rows for a small space: when more stats changed, the last row sums up the rest, so the rows
+-- shown always add up to the total.
+function Compare.TopRows(list, n)
+	if #list <= n then return list end
+	local out, rest = {}, 0
+	for i, e in ipairs(list) do
+		if i < n then out[i] = e else rest = rest + (e.pct or 0) end
+	end
+	out[n] = { key = "OTHER", delta = 0, pct = rest, text = "Other stats" }
+	return out
+end
+
+function Compare.FormatStat(e)
+	if e.text then return e.text, (e.pct or 0) >= 0 end
+	local v = e.delta
+	local num
+	if Items.PERCENT[e.key] then num = ("%g%%"):format(math.floor(math.abs(v) * 10 + 0.5) / 10)
+	elseif e.key == "DPS" then num = ("%.1f"):format(math.abs(v))
+	else num = ("%d"):format(math.floor(math.abs(v) + 0.5)) end
+	return (v >= 0 and "+" or "\226\136\146") .. num .. " " .. Items.LABELS[e.key], v >= 0
+end
+
+local REASON_TEXT = {
+	blocked = "requirements not met",
+	class = "wrong class",
+	level = "level too high",
+	armor = "wrong armor type",
+	weapon = "can't use this weapon",
+	slot = "can't equip with current gear",
+	skill = "profession skill required",
+}
+
+-- /ub item <link>: the full rating in chat.
+function Compare:Explain(link)
+	local res = self:Rate(link)
+	if not res then return GL:Print("Still loading that item. Try again.") end
+	if not res.ok then return GL:Print(link .. ": can't equip (" .. (REASON_TEXT[res.reason] or tostring(res.reason)) .. ")") end
+	local g = res.gain
+	GL:Print(("%s in %s: %s (Damage %s, Survival %s, Mana %s)"):format(link, res.label, GL.Pct(g.total), GL.Pct(g.dmg),
+		GL.Pct(g.surv), GL.Pct(g.sus)))
+	for _, e in ipairs(res.perSlot or {}) do GL:Print(("  %s: %s"):format(e.label, GL.Pct(e.gain.total))) end
+	local c0, c1 = g.cycle0, g.cycle
+	if c0 and c1 then
+		GL:Print(("  Per kill: fighting %.1f s -> %.1f s, resting %.1f s -> %.1f s, sitting %.1f s -> %.1f s, walking %.0f s"):format(
+			c0.fight, c1.fight, c0.rest, c1.rest, c0.stops, c1.stops, c0.travel))
+	end
+	local parts = {}
+	for _, e in ipairs(Compare.Contributions(res)) do parts[#parts + 1] = (Compare.FormatStat(e)) .. " " .. GL.Pct(e.pct or 0) end
+	GL:Print("  " .. table.concat(parts, ", "))
+end

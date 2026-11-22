@@ -1,0 +1,29 @@
+## Interface: 16001
+## Title: Upgrade Broker
+## Notes: Shows gear upgrades as a percentage in tooltips, bags, quest rewards, and the Auction House.
+## Author: muffe
+## Version: @project-version@
+## X-License: MIT
+## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
+## OptionalDeps: EllesmereUI, EllesmereUIBags, EllesmereUIBlizzardSkin
+## SavedVariables: UpgradeBrokerDB
+## SavedVariablesPerCharacter: UpgradeBrokerCharDB
+## AddonCompartmentFunc: UpgradeBroker_OnCompartmentClick
+
+Core.lua
+Data\Classes.lua
+Data\Specs.lua
+Data\Leveling.lua
+Items.lua
+Character.lua
+Model.lua
+Compare.lua
+Scanner.lua
+UI\Theme.lua
+UI\InfoText.lua
+UI\Info.lua
+UI\Window.lua
+UI\Tooltip.lua
+UI\Bags.lua
+UI\Quest.lua
+Options.lua

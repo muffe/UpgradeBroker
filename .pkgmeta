@@ -1,0 +1,6 @@
+package-as: UpgradeBroker
+
+ignore:
+  - tools
+  - tests
+  - docs
