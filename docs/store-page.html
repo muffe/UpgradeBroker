@@ -1,0 +1,26 @@
+<p>Upgrade Broker scans the Auction House on WoW Forever and rates gear against what your character wears as one percentage. It lists the best upgrade per slot with price and shows upgrade ratings in bags, on quest rewards, and in item tooltips.</p>
+<h3>Features</h3>
+<ul>
+<li><strong>Auction House upgrades:</strong> Runs its own full scan or reads Auctionator's full scan, keeps the cheapest buyout per item variant, and lists the best upgrade per slot with price.</li>
+<li><strong>Sort and price limit:</strong> Order by <strong>Best value</strong> or <strong>Biggest upgrade</strong>, and set a <strong>Max per item</strong> limit.</li>
+<li><strong>Upgrades tab:</strong> Opens in an <strong>Upgrades</strong> tab in the Auction House or anywhere with <code>/ub</code>. <strong>Search Auction House</strong> opens the item in the Auction House Buy view (addons cannot buy items on WoW Forever).</li>
+<li><strong>Stat breakdown:</strong> Shows each changed stat with its share of the total, plus seconds per kill saved fighting and resting while leveling.</li>
+<li><strong>Bags, quests, and tooltips:</strong> Adds upgrade badges in Blizzard bags and EllesmereUI Bags, marks quest rewards (frames the best usable choice, or puts a coin on the highest vendor value when nothing is an upgrade), and adds a rating line to item tooltips.</li>
+<li><strong>Alts and specs:</strong> Remembers every character you log in on (same realm and faction) so you can shop for alts from a bank character. Spec is detected from talents.</li>
+<li><strong>Upcoming levels and usability filters:</strong> Shows gear a few levels ahead in amber with its required level. Skips gear the character cannot use based on armor type (option: main armor type only), weapon skills, class restrictions, and professions (such as engineering goggles).</li>
+<li><strong>EllesmereUI support:</strong> Settings live in the EllesmereUI options panel when installed, and the window follows EllesmereUI's theme.</li>
+</ul>
+<h3>How scores work</h3>
+<p>Every item gets one percentage showing how much stronger the character gets.</p>
+<ul>
+<li><strong>Leveling:</strong> Mostly more kills per hour from a kill cycle (fighting, walking, eating and drinking, sitting down) using WoW Forever game data (mob health and damage per level, food and water, main spell ranks), plus a small share for survival.</li>
+<li><strong>Raiding:</strong> Damage on a boss three levels above you, or healing for healers. Combat rules follow <a href="https://github.com/wowsims/forever">wowsims/forever</a>.</li>
+<li><strong>Not counted:</strong> Use effects, procs, and set bonuses. Casters count only their main spell.</li>
+</ul>
+<h3>Commands</h3>
+<ul>
+<li><code>/ub</code>: Open or close the upgrade window.</li>
+<li><code>/ub item &lt;link&gt;</code>: Print the full rating for an item in chat.</li>
+<li><code>/ub forget &lt;name&gt;</code>: Remove a remembered character.</li>
+<li><code>/ub options</code>: Open settings.</li>
+</ul>
