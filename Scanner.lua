@@ -10,7 +10,7 @@ local COOLDOWN = 15 * 60
 -- time per frame for reading and rating: small enough that a 144 Hz frame (7 ms) keeps its pace
 local BATCH_MS = 2
 
-Scanner.state = "idle" -- idle | waiting | reading | rating
+Scanner.state = "idle" -- idle | waiting (for the AH) | reading | rating | items (the game still loads items) | loading (gear)
 Scanner.progress = 0
 
 local function RealmKey() return GL.RealmKey() end
@@ -44,7 +44,7 @@ end
 function Scanner:CanScan()
 	if not (AH and AH.ReplicateItems) then return false, "unavailable" end
 	if not self.ahOpen then return false, "closed" end
-	if self.state ~= "idle" and self.state ~= "loading" then return false, "busy" end
+	if self.state ~= "idle" and self.state ~= "loading" and self.state ~= "items" then return false, "busy" end
 	local last = LastScan()
 	if time() - last < COOLDOWN then return false, "cooldown", COOLDOWN - (time() - last) end
 	return true
@@ -326,7 +326,9 @@ function Scanner:Rate()
 			C_Timer.After(0, step)
 		else
 			self.results = out
-			SetState("idle")
+			-- still waiting for the game to load some items: say so (with how far it got) until the last pass
+			local waitingForItems = missing > 0 and not self.retry and missing < (self.lastMissing or math.huge)
+			SetState(waitingForItems and "items" or "idle", (#keys - missing) / math.max(1, #keys))
 			self:Sort()
 			stats.missing = missing
 			self.lastStats = stats

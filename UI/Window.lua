@@ -470,17 +470,19 @@ local function FillHeader()
 	end
 	local st = Scanner.state
 	local age = Scanner:Age()
-	if st == "waiting" then f.status:SetText("Waiting for Auction House...")
+	if st == "waiting" then f.status:SetText("Waiting for AH...")
 	elseif st == "reading" then f.status:SetText(("Scanning %d%%"):format(Scanner.progress * 100))
 	elseif st == "rating" then f.status:SetText(("Finding upgrades %d%%"):format(Scanner.progress * 100))
+	elseif st == "items" then f.status:SetText(("Loading items %d%%"):format(Scanner.progress * 100))
 	elseif st == "loading" then f.status:SetText("Loading gear...")
 	elseif age then f.status:SetText("Scanned " .. Age(age))
 	else f.status:SetText("") end
-	local busy = st ~= "idle" and st ~= "loading"
+	local busy = st ~= "idle"
 	f.progress:SetShown(busy)
 	if busy then f.progress:SetWidth(math.max(1, f.top:GetWidth() * (st == "waiting" and 0.02 or Scanner.progress))) end
 	local can = Scanner:CanScan()
 	f.scan:SetEnabled(Scanner.ahOpen and not busy)
+	f.scan:SetLabel((st == "waiting" or st == "reading") and "Wait..." or "Scan")
 	-- the scan only asks for attention when there is nothing recent to show
 	f.scan:SetPrimary(can and (not age or age > 2 * 3600))
 	f.close:SetShown(not f.inAH)
@@ -543,8 +545,16 @@ local function FillDetail()
 	if not has then
 		Window.current = nil
 		local st = Scanner.state
-		if st ~= "idle" then
-			f.empty:SetText("")
+		-- something is still on its way: say what, so an empty list doesn't look like "no upgrades"
+		local busyText = {
+			waiting = "Waiting for the Auction House to respond.\nKeep it open until the scan finishes.",
+			reading = "Scanning the Auction House.\nKeep it open until the scan finishes.",
+			rating = "Finding upgrades.\nResults will appear in a moment.",
+			items = "The game is still loading scanned items.\nUpgrades will appear as they load.",
+			loading = "Loading character gear.\nUpgrades will appear in a moment.",
+		}
+		if busyText[st] then
+			f.empty:SetText(busyText[st])
 		elseif Scanner.loadFailed then
 			f.empty:SetText(("Couldn't load %s's gear. Try again in a moment."):format(Scanner.loadFailed))
 		elseif not Scanner:Data() then
