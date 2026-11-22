@@ -371,8 +371,48 @@ local function OpenPending()
 	-- every result is in and ours isn't there (sold meanwhile): stop looking, so a later search isn't hijacked
 	if full then pending = nil end
 end
-GL:On("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", OpenPending)
-GL:On("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", OpenPending)
+-- Every search in the auction house (yours, a shopping list, Search Auction House) brings fresh lowest prices;
+-- they replace the scan's for items with a single variant, so the list doesn't keep a price that has changed.
+local priceSoon
+local function TakeBrowsePrices()
+	local data = Scanner:Data()
+	if not data then return end
+	local ok, results = pcall(AH.GetBrowseResults)
+	if not ok or type(results) ~= "table" then return end
+	local fresh, variants = {}, {}
+	for _, r in ipairs(results) do
+		local id = r.itemKey and r.itemKey.itemID
+		if id and r.minPrice and r.minPrice > 0 then
+			variants[id] = (variants[id] or 0) + 1
+			fresh[id] = r.minPrice
+		end
+	end
+	if not next(fresh) then return end
+	local keysOf = {}
+	for key in pairs(data.items) do
+		local id = tonumber(key:match("^(%d+)"))
+		if id and fresh[id] then keysOf[id] = keysOf[id] or {}; table.insert(keysOf[id], key) end
+	end
+	local changed = false
+	for id, keys in pairs(keysOf) do
+		-- only when the item has one variant on both sides; "of the Owl" and "of the Bear" can't be told apart here
+		if #keys == 1 and variants[id] == 1 then
+			local price, link = data.items[keys[1]]:match("^(%d+)|(.+)$")
+			if tonumber(price) ~= fresh[id] then
+				data.items[keys[1]] = fresh[id] .. "|" .. link
+				changed = true
+			end
+		end
+	end
+	if changed and not priceSoon then
+		priceSoon = true
+		C_Timer.After(0.5, function() priceSoon = false; if Scanner.state == "idle" then Scanner:Rate() end end)
+	end
+end
+Scanner.TakeBrowsePrices = TakeBrowsePrices
+
+GL:On("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", function() OpenPending(); TakeBrowsePrices() end)
+GL:On("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", function() OpenPending(); TakeBrowsePrices() end)
 -- a search the player starts by hand cancels ours
 GL:On("AUCTION_HOUSE_SHOW", function()
 	local bar = AuctionHouseFrame and AuctionHouseFrame.SearchBar

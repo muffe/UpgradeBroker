@@ -340,6 +340,14 @@ try("items the client loads late are rated on later passes", function()
 	assert(n == 3, "rated " .. n .. " of 3 late items")
 	GL.Scanner:Explain()
 end)
+try("a search in the auction house updates the scan's price", function()
+	local wand = replicate[5] -- Gravestone Scepter, 7g 90s in the scan
+	C_AuctionHouse.GetBrowseResults = function() return { { itemKey = { itemID = wand.id }, minPrice = 39900, totalQuantity = 1 } } end
+	GL:Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+	local key = GL.Scanner.KeyOf(wand.link)
+	assert(GL.Scanner:Data().items[key]:match("^(%d+)") == "39900", GL.Scanner:Data().items[key])
+	C_AuctionHouse.GetBrowseResults = function() return {} end
+end)
 try("auction house closes", function() GL:Fire("AUCTION_HOUSE_CLOSED") end)
 try("debug dump", function() GL.Character:Dump() end)
 try("explain", function() GL.Compare:Explain(res.CHEST[1].link) end)
