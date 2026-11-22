@@ -641,7 +641,8 @@ local function FillDetail()
 			local two = false
 			for _, j in ipairs({ idx - 1, idx + 1 }) do
 				local n = list[j]
-				if n and GL.Pct(n.gain) == GL.Pct(c.gain) and GL.Pct(n.gain, nil, 2) ~= GL.Pct(c.gain, nil, 2) then two = true end
+				-- (under 0.05 % apart they count as equal and the cheaper one is first, so they keep one decimal)
+				if n and math.abs(n.gain - c.gain) >= 0.05 and GL.Pct(n.gain) == GL.Pct(c.gain) then two = true end
 			end
 			SetGainText(r.gain, c.gain, c.later, two and 2 or nil)
 			r.price:SetText(GL.Money(c.price))
