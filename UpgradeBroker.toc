@@ -4,6 +4,7 @@
 ## Author: muffe
 ## Version: @project-version@
 ## X-License: MIT
+## X-Curse-Project-ID: 1824631
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
 ## OptionalDeps: EllesmereUI, EllesmereUIBags, EllesmereUIBlizzardSkin
 ## SavedVariables: UpgradeBrokerDB
