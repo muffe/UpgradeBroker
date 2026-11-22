@@ -53,6 +53,8 @@ local function ParsePrice(text)
 end
 
 local function Results() return Scanner.results end
+-- upgrades above your price limit, only for slots with nothing within it (cheapest first)
+local function Above() return Scanner.above or {} end
 
 -- The slot list is always in equipment order, so a slot is always in the same place; the order switch only
 -- decides which item each slot shows (best value or biggest upgrade).
@@ -324,6 +326,7 @@ local function Build()
 		return t
 	end
 	local hItem = H("ITEM", "LEFT", 44)
+	f.hItem = hItem
 	local hPrice = H("PRICE", "RIGHT", -16, 64)
 	local hGain = T.Text(head, 10, C.sec); hGain:SetText("UPGRADE"); hGain:SetWidth(54); hGain:SetJustifyH("RIGHT")
 	hGain:SetPoint("RIGHT", hPrice, "LEFT", -8, 0)
@@ -503,7 +506,8 @@ end
 local function FillList()
 	local res = Results() or {}
 	local groups = GroupList()
-	if not selectedGroup or not res[selectedGroup] then
+	local above = Above()
+	if not selectedGroup or not (res[selectedGroup] or above[selectedGroup]) then
 		selectedGroup, selectedLink, candOffset = nil, nil, 0
 		for _, g in ipairs(groups) do
 			if res[g.key] then selectedGroup = g.key break end
@@ -514,10 +518,11 @@ local function FillList()
 		local g = groups[i]
 		local list = g and res[g.key]
 		local e = list and list[1]
+		local over = not e and g and above[g.key] and above[g.key][1]
 		r.group, r.entry = g and g.key, e
 		r.slot:SetText(g and g.label or "")
 		r.odd:SetVertexColor(0, 0, 0, (i % 2 == 1) and 0.10 or 0)
-		r.selected = g and g.key == selectedGroup and e ~= nil
+		r.selected = g and g.key == selectedGroup and (e ~= nil or over ~= nil)
 		r.hl:SetVertexColor(a[1], a[2], a[3], r.selected and 0.10 or 0)
 		r.mark:SetVertexColor(a[1], a[2], a[3], r.selected and 1 or 0)
 		if e then
@@ -527,6 +532,14 @@ local function FillList()
 			r.name:SetText(e.item.name)
 			SetGainText(r.gain, e.gain, e.later)
 			r.price:SetText(GL.MoneyShort(e.price))
+			r:Enable()
+		elseif over then
+			-- nothing within your limit: where upgrades start, quiet, so the limit still reads as the rule
+			T.Color(r.slot, C.dim)
+			r.icon:Hide()
+			r.name:SetText(T.Hex(C.sec) .. "from " .. GL.MoneyShort(over.price, true) .. "|r")
+			r.gain:SetText("")
+			r.price:SetText("")
 			r:Enable()
 		else
 			T.Color(r.slot, C.sec)
@@ -549,6 +562,9 @@ end
 local function FillDetail()
 	local res = Results()
 	local list = selectedGroup and res and res[selectedGroup]
+	local overLimit = false
+	if not list and selectedGroup and Above()[selectedGroup] then list, overLimit = Above()[selectedGroup], true end
+	f.hItem:SetText(overLimit and ("ABOVE YOUR " .. GL.MoneyShort(GL.db.maxPrice, true):upper() .. " LIMIT") or "ITEM")
 	local has = list and #list > 0
 	f.eq:SetShown(has); f.head:SetShown(has); f.cands:SetShown(has); f.why:SetShown(has)
 	f.empty:SetShown(not has)

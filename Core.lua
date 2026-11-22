@@ -83,12 +83,15 @@ function GL.Money(c, plain)
 end
 
 -- Short price for tight columns: 7.9g, 12g, 85s, 40c.
-function GL.MoneyShort(c)
+function GL.MoneyShort(c, plain)
 	c = math.floor((c or 0) + 0.5)
-	if c >= 100000 then return ("|cffffd100%dg|r"):format(c / 10000) end
-	if c >= 10000 then return ("|cffffd100%sg|r"):format((("%.1f"):format(c / 10000)):gsub("%.0$", "")) end
-	if c >= 100 then return ("|cffc7c7cf%ds|r"):format(c / 100) end
-	return ("|cffeda55f%dc|r"):format(c)
+	local text, color
+	if c >= 100000 then text, color = ("%dg"):format(c / 10000), "ffd100"
+	elseif c >= 10000 then text, color = (("%.1f"):format(c / 10000):gsub("%.0$", "")) .. "g", "ffd100"
+	elseif c >= 100 then text, color = ("%ds"):format(c / 100), "c7c7cf"
+	else text, color = ("%dc"):format(c), "eda55f" end
+	if plain then return text end
+	return "|cff" .. color .. text .. "|r"
 end
 
 -- "+1.0 s", "−0.3 s", "0.0 s"

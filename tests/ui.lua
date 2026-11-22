@@ -348,6 +348,18 @@ try("a search in the auction house updates the scan's price", function()
 	assert(GL.Scanner:Data().items[key]:match("^(%d+)") == "39900", GL.Scanner:Data().items[key])
 	C_AuctionHouse.GetBrowseResults = function() return {} end
 end)
+try("a slot with nothing under the limit shows where upgrades start", function()
+	T.Reset({ level = 35, class = "WARLOCK", className = "Warlock", stats = { 30, 35, 80, 110, 105 }, hp = 1300, mana = 1800,
+		spAll = 20, scrit = 6, armor = 420, regen = 14, regenIC = 0 })
+	GL:SetViewing(nil); GL.Character:Invalidate(); GL.Compare:ClearCache()
+	GL.db.maxPrice = 20000 -- 2g: the robes (3g 40s and up) are above it
+	GL.Scanner:Rate()
+	assert(not (GL.Scanner.results or {}).CHEST, "no chest within 2g")
+	local chest = GL.Scanner.above and GL.Scanner.above.CHEST
+	assert(chest and chest[1].price == 34000, "cheapest chest above the limit first")
+	GL.Window:Show(); GL.Window:Refresh()
+	GL.db.maxPrice = 1e12
+end)
 try("auction house closes", function() GL:Fire("AUCTION_HOUSE_CLOSED") end)
 try("debug dump", function() GL.Character:Dump() end)
 try("explain", function() GL.Compare:Explain(res.CHEST[1].link) end)

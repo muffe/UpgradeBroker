@@ -287,7 +287,7 @@ function Scanner:Rate()
 	self.loadTries, self.loadFailed = 0, nil
 	local keys = {}
 	for key in pairs(data.items) do keys[#keys + 1] = key end
-	local out, missing, i = {}, 0, 0
+	local out, above, missing, i = {}, {}, 0, 0
 	local stats = { priced = 0, missing = 0, unusable = {}, small = 0, upgrades = 0, near = {} }
 	local maxPrice = GL.db.maxPrice
 	SetState("rating", 0)
@@ -298,11 +298,15 @@ function Scanner:Rate()
 			i = i + 1
 			local price, link = data.items[keys[i]]:match("^(%d+)|(.+)$")
 			price = tonumber(price)
-			if price and price <= maxPrice then
+			-- everything is rated; what costs more than your limit only fills slots that have nothing within it
+			local within = price and price <= maxPrice
+			if price then
 				local res = GL.Compare:Rate(link, who)
-				stats.priced = stats.priced + 1
+				if within then stats.priced = stats.priced + 1 end
 				if not res then
 					missing = missing + 1
+				elseif not within then
+					-- (not counted in /ub why, which is about the items within your limit)
 				elseif not res.ok then
 					stats.unusable[res.reason or "?"] = (stats.unusable[res.reason or "?"] or 0) + 1
 				elseif not GL.Compare.IsUpgrade(res) then
@@ -312,11 +316,12 @@ function Scanner:Rate()
 					end
 				end
 				if res and GL.Compare.IsUpgrade(res) then
-					stats.upgrades = stats.upgrades + 1
+					if within then stats.upgrades = stats.upgrades + 1 end
 					local g = GROUP_OF[res.slot]
+					local into = within and out or above
 					if g then
-						out[g] = out[g] or {}
-						table.insert(out[g], { link = link, item = res.item, res = res, price = price, gain = res.gain.total,
+						into[g] = into[g] or {}
+						table.insert(into[g], { link = link, item = res.item, res = res, price = price, gain = res.gain.total,
 							perGold = res.gain.total / math.max(0.01, price / 10000), later = res.reason == "later" })
 					end
 				end
@@ -327,6 +332,16 @@ function Scanner:Rate()
 			C_Timer.After(0, step)
 		else
 			self.results = out
+			-- above the limit, only for slots with nothing within it; cheapest first
+			for g in pairs(above) do if out[g] then above[g] = nil end end
+			for _, list in pairs(above) do
+				table.sort(list, function(a, b)
+					if a.later ~= b.later then return not a.later end
+					if a.price ~= b.price then return a.price < b.price end
+					return a.gain > b.gain
+				end)
+			end
+			self.above = above
 			-- still waiting for the game to load some items: say so (with how far it got) until the last pass
 			local waitingForItems = missing > 0 and not self.retry and missing < (self.lastMissing or math.huge)
 			SetState(waitingForItems and "items" or "idle", (#keys - missing) / math.max(1, #keys))
