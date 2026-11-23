@@ -10,7 +10,7 @@ local COOLDOWN = 15 * 60
 -- time per frame for reading and rating: small enough that a 144 Hz frame (7 ms) keeps its pace
 local BATCH_MS = 2
 
-Scanner.state = "idle" -- idle | waiting (for the AH) | reading | rating | items (the game still loads items) | loading (gear)
+Scanner.state = "idle" -- idle | waiting (for the AH) | reading | rating | loading (gear)
 Scanner.progress = 0
 
 local function RealmKey() return GL.RealmKey() end
@@ -44,7 +44,7 @@ end
 function Scanner:CanScan()
 	if not (AH and AH.ReplicateItems) then return false, "unavailable" end
 	if not self.ahOpen then return false, "closed" end
-	if self.state ~= "idle" and self.state ~= "loading" and self.state ~= "items" then return false, "busy" end
+	if self.state ~= "idle" and self.state ~= "loading" then return false, "busy" end
 	local last = LastScan()
 	if time() - last < COOLDOWN then return false, "cooldown", COOLDOWN - (time() - last) end
 	return true
@@ -234,7 +234,7 @@ end
 -- stops a rating that is still running (its results would belong to another character)
 function Scanner:CancelRating()
 	ratingRun = ratingRun + 1
-	if self.state == "rating" or self.state == "loading" or self.state == "items" then self.state = "idle" end
+	if self.state == "rating" or self.state == "loading" then self.state = "idle" end
 end
 
 -- Value of an entry: percent per gold. Gear that needs a few more levels goes after what you can wear now.
@@ -330,71 +330,79 @@ function Scanner:Rate()
 	self.loadTries, self.loadFailed = 0, nil
 	local keys = {}
 	for key in pairs(data.items) do keys[#keys + 1] = key end
-	local all, missing, i = {}, 0, 0
+	local total = #keys
+	-- todo: the items of this pass; later: those the game was still loading, for the next pass
+	local all, todo, later, i, lastMissing = {}, keys, {}, 0, math.huge
 	local maxPrice = GL.db.maxPrice
 	local stats = { priced = 0, missing = 0, unusable = {}, small = 0, upgrades = 0, near = {} }
+	-- false while the game is still loading the item
+	local function RateOne(key)
+		local entry = data.items[key] -- (gone when it sold meanwhile)
+		local price, link
+		if entry then price, link = entry:match("^(%d+)|(.+)$") end
+		price = tonumber(price)
+		if not price then return true end
+		-- everything is rated; what costs more than your limit only fills slots that have nothing within it
+		local within = price <= maxPrice
+		-- gear this character can never wear is left out before its tooltip is read
+		local reject = GL.Compare.QuickReject(who, link)
+		local res = not reject and GL.Compare:Rate(link, who)
+		if not reject and not res then return false end
+		if within then stats.priced = stats.priced + 1 end
+		if reject then
+			if within then stats.unusable[reject] = (stats.unusable[reject] or 0) + 1 end
+		elseif not within then
+			-- (not counted in /ub why, which is about the items within your limit)
+		elseif not res.ok then
+			stats.unusable[res.reason or "?"] = (stats.unusable[res.reason or "?"] or 0) + 1
+		elseif not GL.Compare.IsUpgrade(res) then
+			stats.small = stats.small + 1
+			if res.gain and res.gain.total > 0 then
+				table.insert(stats.near, { link = link, gain = res.gain.total })
+			end
+		end
+		if res and GL.Compare.IsUpgrade(res) then
+			if within then stats.upgrades = stats.upgrades + 1 end
+			local g = GROUP_OF[res.slot]
+			if g then
+				all[g] = all[g] or {}
+				table.insert(all[g], { link = link, key = key, item = res.item, res = res, price = price,
+					gain = res.gain.total, perGold = res.gain.total / math.max(0.01, price / 10000),
+					later = res.reason == "later" })
+			end
+		end
+		return true
+	end
+	-- one bar across all passes: the share of items rated so far
+	local function Progress() return (total - (#todo - i) - #later) / math.max(1, total) end
 	SetState("rating", 0)
 	local function step()
 		if run ~= ratingRun then return end
 		local stop = debugprofilestop() + BATCH_MS
-		while i < #keys and debugprofilestop() < stop do
+		while i < #todo and debugprofilestop() < stop do
 			i = i + 1
-			local price, link = data.items[keys[i]]:match("^(%d+)|(.+)$")
-			price = tonumber(price)
-			-- everything is rated; what costs more than your limit only fills slots that have nothing within it
-			local within = price and price <= maxPrice
-			if price then
-				if within then stats.priced = stats.priced + 1 end
-				-- gear this character can never wear is left out before its tooltip is read
-				local reject = GL.Compare.QuickReject(who, link)
-				local res = not reject and GL.Compare:Rate(link, who)
-				if reject then
-					if within then stats.unusable[reject] = (stats.unusable[reject] or 0) + 1 end
-				elseif not res then
-					missing = missing + 1
-				elseif not within then
-					-- (not counted in /ub why, which is about the items within your limit)
-				elseif not res.ok then
-					stats.unusable[res.reason or "?"] = (stats.unusable[res.reason or "?"] or 0) + 1
-				elseif not GL.Compare.IsUpgrade(res) then
-					stats.small = stats.small + 1
-					if res.gain and res.gain.total > 0 then
-						table.insert(stats.near, { link = link, gain = res.gain.total })
-					end
-				end
-				if res and GL.Compare.IsUpgrade(res) then
-					if within then stats.upgrades = stats.upgrades + 1 end
-					local g = GROUP_OF[res.slot]
-					if g then
-						all[g] = all[g] or {}
-						table.insert(all[g], { link = link, key = keys[i], item = res.item, res = res, price = price,
-							gain = res.gain.total, perGold = res.gain.total / math.max(0.01, price / 10000),
-							later = res.reason == "later" })
-					end
-				end
-			end
+			if not RateOne(todo[i]) then later[#later + 1] = todo[i] end
 		end
-		if i < #keys then
-			SetState("rating", i / #keys)
+		if i < #todo then
+			SetState("rating", Progress())
 			C_Timer.After(0, step)
-		else
-			self.all = all
-			-- still waiting for the game to load some items: say so (with how far it got) until the last pass
-			local waitingForItems = missing > 0 and not self.retry and missing < (self.lastMissing or math.huge)
-			SetState(waitingForItems and "items" or "idle", (#keys - missing) / math.max(1, #keys))
-			self:Split()
-			stats.missing = missing
-			self.lastStats = stats
-			-- items the client was still loading: rate again while it keeps delivering them (a full scan can
-			-- hold thousands the client has never seen; one retry left most of them out)
-			if missing > 0 and not self.retry and missing < (self.lastMissing or math.huge) then
-				self.retry = true
-				self.lastMissing = missing
-				C_Timer.After(3, function() self.retry = false; if run == ratingRun then self:Rate() end end)
-			else
-				self.lastMissing = nil
-			end
+			return
 		end
+		-- what is rated so far shows right away
+		self.all = all
+		stats.missing = #later
+		self.lastStats = stats
+		self:Split()
+		-- items the client was still loading (a full scan can hold thousands it has never seen): only those are
+		-- rated again, as long as the game keeps delivering them
+		if #later > 0 and #later < lastMissing then
+			lastMissing = #later
+			todo, later, i = later, {}, 0
+			SetState("rating", Progress())
+			C_Timer.After(3, step)
+			return
+		end
+		SetState("idle")
 	end
 	step()
 end

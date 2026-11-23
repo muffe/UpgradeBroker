@@ -462,7 +462,7 @@ local function Build()
 	f:SetScript("OnSizeChanged", function() Window:Layout() end)
 	f:SetScript("OnHide", function()
 		-- no rating with the window closed: a pass that was running starts over when it opens again
-		if Scanner.state == "rating" or Scanner.state == "loading" or Scanner.state == "items" then
+		if Scanner.state == "rating" or Scanner.state == "loading" then
 			Scanner:CancelRating()
 			Scanner.stale = true
 		end
@@ -524,7 +524,6 @@ local function FillHeader()
 	if st == "waiting" then f.status:SetText("Waiting for AH...")
 	elseif st == "reading" then f.status:SetText(("Scanning %d%%"):format(Scanner.progress * 100))
 	elseif st == "rating" then f.status:SetText(("Finding upgrades %d%%"):format(Scanner.progress * 100))
-	elseif st == "items" then f.status:SetText(("Loading items %d%%"):format(Scanner.progress * 100))
 	elseif st == "loading" then f.status:SetText("Loading gear...")
 	elseif age then f.status:SetText("Scanned " .. Age(age))
 	else f.status:SetText("") end
@@ -649,7 +648,6 @@ local function FillDetail()
 			waiting = "Waiting for the Auction House to respond.\nKeep it open until the scan finishes.",
 			reading = "Scanning the Auction House.\nKeep it open until the scan finishes.",
 			rating = "Finding upgrades.\nResults will appear in a moment.",
-			items = "The game is still loading scanned items.\nUpgrades will appear as they load.",
 			loading = "Loading character gear.\nUpgrades will appear in a moment.",
 		}
 		if busyText[st] then

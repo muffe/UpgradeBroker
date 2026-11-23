@@ -388,13 +388,33 @@ try("items the client loads late are rated on later passes", function()
 	for link in pairs(slow) do T.slow[link] = true end
 	GL.db.lastReplicate = 0
 	GL.Scanner.state = "idle"
+	-- one run: the bar only moves forward, and later passes rate only the late items
+	local seen, last, rated = {}, -1, {}
+	local realRate = GL.Compare.Rate
+	GL.Compare.Rate = function(self, link, ...) rated[#rated + 1] = link; return realRate(self, link, ...) end
+	GL:On("GL_SCAN_STATE", function()
+		local st = GL.Scanner.state
+		if st == "rating" then
+			assert(GL.Scanner.progress >= last, ("bar went back from %.2f to %.2f"):format(last, GL.Scanner.progress))
+			last = GL.Scanner.progress
+		end
+		seen[#seen + 1] = st
+	end)
 	assert(GL.Scanner:Start()); GL:Fire("REPLICATE_ITEM_LIST_UPDATE")
 	-- the client delivers one item per pass
 	for link in pairs(slow) do
+		rated = {}
 		T.slow[link] = nil
 		T.RunLater()
+		for _, l in ipairs(rated) do assert(slow[l], "a later pass rated " .. l .. " again") end
 	end
 	T.RunLater()
+	GL.Compare.Rate = realRate
+	local after = false
+	for _, st in ipairs(seen) do
+		if st == "rating" then after = true elseif after then assert(st == "idle" and seen[#seen] == "idle", "rating stopped before the end") end
+	end
+	assert(GL.Scanner.state == "idle", GL.Scanner.state)
 	local hands = GL.Scanner.results and GL.Scanner.results.HANDS or {}
 	local n = 0
 	for _, e in ipairs(hands) do if e.item.name:find("^Slow Gloves") then n = n + 1 end end
