@@ -299,6 +299,11 @@ function Scanner:Rate()
 	-- a scan in progress rates when it is done; starting now would make it miss its answer
 	if self.state == "waiting" or self.state == "reading" then self.rateAfter = true return end
 	self.rateAfter = false
+	-- only for the open window: a saved scan holds thousands of items, and gear changes all the time while
+	-- you level (loot, durability). The window rates when it opens.
+	local f = _G.UpgradeBrokerFrame
+	if not (f and f:IsVisible()) then self.stale = true return end
+	self.stale = false
 	local data = self:Data()
 	ratingRun = ratingRun + 1
 	local run = ratingRun

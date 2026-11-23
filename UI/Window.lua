@@ -438,7 +438,11 @@ local function Build()
 	f.empty:SetJustifyH("CENTER")
 	f.empty:SetWidth(380); f.empty:SetWordWrap(true)
 
-	f:SetScript("OnShow", function() Window:Layout(); Window:Refresh() end)
+	f:SetScript("OnShow", function()
+		Window:Layout()
+		if Scanner.stale then Scanner:Rate() end
+		Window:Refresh()
+	end)
 	f:SetScript("OnSizeChanged", function() Window:Layout() end)
 end
 

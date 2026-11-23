@@ -391,6 +391,23 @@ try("a slot with nothing under the limit shows where upgrades start", function()
 	GL.db.maxPrice = 1e12
 end)
 try("auction house closes", function() GL:Fire("AUCTION_HOUSE_CLOSED") end)
+try("no rating while the window is closed", function()
+	GL.Window:Hide()
+	local before = GL.Scanner.results
+	local rated = 0
+	local orig = GL.Compare.Rate
+	GL.Compare.Rate = function(...) rated = rated + 1 return orig(...) end
+	-- looting or losing durability fires this without a change in what you wear
+	GL.lastWorn = nil
+	GL:Fire("UNIT_INVENTORY_CHANGED", "player")
+	GL:Fire("UNIT_INVENTORY_CHANGED", "player")
+	GL:Fire("GL_CHANGED")
+	assert(rated == 0, "rated " .. rated .. " items with the window closed")
+	assert(GL.Scanner.stale, "marked for the next open")
+	GL.Window:Show()
+	assert(rated > 0 and not GL.Scanner.stale, "rates when the window opens")
+	GL.Compare.Rate = orig
+end)
 try("debug dump", function() GL.Character:Dump() end)
 try("explain", function() GL.Compare:Explain(res.CHEST[1].link) end)
 

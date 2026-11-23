@@ -219,7 +219,15 @@ function GL.FillDefaults() Fill(UpgradeBrokerDB, DEFAULTS) end
 for _, e in ipairs({ "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP", "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED",
 	"ACTIVE_TALENT_GROUP_CHANGED", "UNIT_INVENTORY_CHANGED" }) do
 	GL:On(e, function(unit)
-		if e == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
+		if e == "UNIT_INVENTORY_CHANGED" then
+			-- it also fires for loot and durability; only a change in what you wear counts
+			if unit ~= "player" then return end
+			local links = {}
+			for slot = 1, 19 do links[slot] = GetInventoryItemLink("player", slot) or "" end
+			local worn = table.concat(links, ";")
+			if worn == GL.lastWorn then return end
+			GL.lastWorn = worn
+		end
 		GL:Invalidate()
 	end)
 end
