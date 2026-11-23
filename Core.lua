@@ -184,15 +184,19 @@ function GL:SetViewing(name)
 	-- the list belongs to whoever it was rated for
 	if GL.Scanner then
 		GL.Scanner:CancelRating()
-		GL.Scanner.results = nil; GL.Scanner.loadTries = 0; GL.Scanner.loadFailed = nil
+		GL.Scanner.results, GL.Scanner.above, GL.Scanner.all = nil, nil, nil
+		GL.Scanner.loadTries = 0; GL.Scanner.loadFailed = nil
 		GL:Fire("GL_RESULTS")
 	end
 	GL:Invalidate()
 end
 
 -- Something that changes every rating happened (gear, spec, mode, level): drop caches and tell the UI.
-local pending
+-- In combat it waits for the fight to end: the client hides some totals in combat, and a snapshot built then
+-- would rate everything against them.
+local pending, afterCombat
 function GL:Invalidate()
+	if InCombatLockdown and InCombatLockdown() then afterCombat = true return end
 	if pending then return end
 	pending = true
 	C_Timer.After(0.2, function()
@@ -202,6 +206,9 @@ function GL:Invalidate()
 		GL:Fire("GL_CHANGED")
 	end)
 end
+GL:On("PLAYER_REGEN_ENABLED", function()
+	if afterCombat then afterCombat = false; GL:Invalidate() end
+end)
 
 GL:On("ADDON_LOADED", function(name)
 	if name ~= ADDON then return end

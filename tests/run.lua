@@ -46,6 +46,16 @@ check("warlock: the robe you wear is +0%", math.abs(r4.gain.total) < 1e-9, pct(r
 check("warlock: leather is not usable", not rate(leather).ok)
 local rf = rate(future)
 check("warlock: level 37 robe is usable later", rf.ok and rf.reason == "later", pct(rf))
+-- gear a warlock can never wear is turned away before its tooltip is read
+local plate = T.Item("plate", { name = "Plate Helm", equipLoc = "INVTYPE_HEAD", classID = 4, subclassID = 4, stats = {} })
+local sword2h = T.Item("2h-sword", { name = "Greatsword", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 8, stats = {} })
+local far = T.Item("far", { name = "Far Robe", equipLoc = "INVTYPE_ROBE", classID = 4, subclassID = 1, reqLevel = 45, stats = {} })
+local s35 = GL.Character:Get()
+check("quick reject: plate for a warlock", GL.Compare.QuickReject(s35, plate) == "armor")
+check("quick reject: a two-handed sword for a warlock", GL.Compare.QuickReject(s35, sword2h) == "weapon")
+check("quick reject: level 45 at 35", GL.Compare.QuickReject(s35, far) == "level")
+check("quick reject: a cloth robe takes the full look", GL.Compare.QuickReject(s35, staRobe) == nil)
+check("quick reject: the level 37 robe takes the full look", GL.Compare.QuickReject(s35, future) == nil)
 print(("     shadow robe: dmg %+.2f surv %+.2f mana %+.2f"):format(r1.gain.dmg, r1.gain.surv, r1.gain.sus))
 print(("     stamina robe: dmg %+.2f surv %+.2f mana %+.2f"):format(r2.gain.dmg, r2.gain.surv, r2.gain.sus))
 

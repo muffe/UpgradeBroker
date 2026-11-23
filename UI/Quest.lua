@@ -117,7 +117,13 @@ end
 
 GL.Quest = { Update = Update, marks = marks }
 
-local function Soon() C_Timer.After(0, function() pcall(Update) end) end
+-- once per frame, however many item loads arrive in it
+local soon
+local function Soon()
+	if soon then return end
+	soon = true
+	C_Timer.After(0, function() soon = false; pcall(Update) end)
+end
 
 if QuestInfo_Display then hooksecurefunc("QuestInfo_Display", Soon) end
 GL:On("QUEST_COMPLETE", Soon)

@@ -234,7 +234,7 @@ end
 -- stops a rating that is still running (its results would belong to another character)
 function Scanner:CancelRating()
 	ratingRun = ratingRun + 1
-	if self.state == "rating" or self.state == "loading" then self.state = "idle" end
+	if self.state == "rating" or self.state == "loading" or self.state == "items" then self.state = "idle" end
 end
 
 -- Value of an entry: percent per gold. Gear that needs a few more levels goes after what you can wear now.
@@ -242,8 +242,10 @@ local function Better(order)
 	return function(a, b)
 		if a.later ~= b.later then return not a.later end
 		if order == "gain" then
-			-- upgrades within 0.05 % of each other count as equal: the cheaper one first
-			if math.abs(a.gain - b.gain) >= 0.05 then return a.gain > b.gain end
+			-- upgrades in the same 0.05 % step count as equal: the cheaper one first (steps, not "within 0.05 % of
+			-- each other", so the order stays consistent and table.sort can't fail)
+			local sa, sb = math.floor(a.gain * 20 + 0.5), math.floor(b.gain * 20 + 0.5)
+			if sa ~= sb then return sa > sb end
 			return a.price < b.price
 		end
 		if a.perGold ~= b.perGold then return a.perGold > b.perGold end
@@ -307,6 +309,7 @@ function Scanner:Rate()
 	local data = self:Data()
 	ratingRun = ratingRun + 1
 	local run = ratingRun
+	self.all = nil
 	if not data then self.results = nil GL:Fire("GL_RESULTS") return end
 	local who = GL.Character:Viewed()
 	-- the gear to compare with is still loading: wait for it instead of rating against half of it
@@ -327,9 +330,9 @@ function Scanner:Rate()
 	self.loadTries, self.loadFailed = 0, nil
 	local keys = {}
 	for key in pairs(data.items) do keys[#keys + 1] = key end
-	local out, above, missing, i = {}, {}, 0, 0
-	local stats = { priced = 0, missing = 0, unusable = {}, small = 0, upgrades = 0, near = {} }
+	local all, missing, i = {}, 0, 0
 	local maxPrice = GL.db.maxPrice
+	local stats = { priced = 0, missing = 0, unusable = {}, small = 0, upgrades = 0, near = {} }
 	SetState("rating", 0)
 	local function step()
 		if run ~= ratingRun then return end
@@ -341,9 +344,13 @@ function Scanner:Rate()
 			-- everything is rated; what costs more than your limit only fills slots that have nothing within it
 			local within = price and price <= maxPrice
 			if price then
-				local res = GL.Compare:Rate(link, who)
 				if within then stats.priced = stats.priced + 1 end
-				if not res then
+				-- gear this character can never wear is left out before its tooltip is read
+				local reject = GL.Compare.QuickReject(who, link)
+				local res = not reject and GL.Compare:Rate(link, who)
+				if reject then
+					if within then stats.unusable[reject] = (stats.unusable[reject] or 0) + 1 end
+				elseif not res then
 					missing = missing + 1
 				elseif not within then
 					-- (not counted in /ub why, which is about the items within your limit)
@@ -358,11 +365,11 @@ function Scanner:Rate()
 				if res and GL.Compare.IsUpgrade(res) then
 					if within then stats.upgrades = stats.upgrades + 1 end
 					local g = GROUP_OF[res.slot]
-					local into = within and out or above
 					if g then
-						into[g] = into[g] or {}
-						table.insert(into[g], { link = link, item = res.item, res = res, price = price, gain = res.gain.total,
-							perGold = res.gain.total / math.max(0.01, price / 10000), later = res.reason == "later" })
+						all[g] = all[g] or {}
+						table.insert(all[g], { link = link, key = keys[i], item = res.item, res = res, price = price,
+							gain = res.gain.total, perGold = res.gain.total / math.max(0.01, price / 10000),
+							later = res.reason == "later" })
 					end
 				end
 			end
@@ -371,21 +378,11 @@ function Scanner:Rate()
 			SetState("rating", i / #keys)
 			C_Timer.After(0, step)
 		else
-			self.results = out
-			-- above the limit, only for slots with nothing within it; cheapest first
-			for g in pairs(above) do if out[g] then above[g] = nil end end
-			for _, list in pairs(above) do
-				table.sort(list, function(a, b)
-					if a.later ~= b.later then return not a.later end
-					if a.price ~= b.price then return a.price < b.price end
-					return a.gain > b.gain
-				end)
-			end
-			self.above = above
+			self.all = all
 			-- still waiting for the game to load some items: say so (with how far it got) until the last pass
 			local waitingForItems = missing > 0 and not self.retry and missing < (self.lastMissing or math.huge)
 			SetState(waitingForItems and "items" or "idle", (#keys - missing) / math.max(1, #keys))
-			self:Sort()
+			self:Split()
 			stats.missing = missing
 			self.lastStats = stats
 			-- items the client was still loading: rate again while it keeps delivering them (a full scan can
@@ -400,6 +397,36 @@ function Scanner:Rate()
 		end
 	end
 	step()
+end
+
+-- Splits the rated upgrades by your max price: within it they make the list; above it they only fill slots
+-- with nothing within it, cheapest first. A new limit needs no new rating.
+function Scanner:Split()
+	if not self.all then return end
+	local maxPrice = GL.db.maxPrice
+	local out, above = {}, {}
+	for g, list in pairs(self.all) do
+		for _, e in ipairs(list) do
+			local into = e.price <= maxPrice and out or above
+			into[g] = into[g] or {}
+			into[g][#into[g] + 1] = e
+		end
+	end
+	for g in pairs(above) do if out[g] then above[g] = nil end end
+	for _, list in pairs(above) do
+		table.sort(list, function(a, b)
+			if a.later ~= b.later then return not a.later end
+			if a.price ~= b.price then return a.price < b.price end
+			return a.gain > b.gain
+		end)
+	end
+	self.results, self.above = out, above
+	self:Sort()
+end
+
+-- The max price changed: split again when the last rating still holds, else rate.
+function Scanner:SetMaxPrice()
+	if self.all and not self.stale and self.state ~= "rating" and self.state ~= "loading" then self:Split() else self:Rate() end
 end
 
 GL:On("GL_CHANGED", function() if Scanner:Data() then Scanner:Rate() end end)
@@ -424,12 +451,40 @@ local function OpenPending()
 			return
 		end
 	end
-	-- every result is in and ours isn't there (sold meanwhile): stop looking, so a later search isn't hijacked
-	if full then pending = nil end
+	-- every result is in and ours isn't there: it sold meanwhile. Stop looking, so a later search isn't hijacked,
+	-- and take it off the list so the next one moves up.
+	if full then
+		local gone = pending
+		pending = nil
+		Scanner:Drop(gone.key)
+		GL:Print(("%s is no longer on the Auction House and was removed from the upgrade list."):format(gone.link))
+	end
+end
+
+-- Removes one scanned item (sold) from the saved scan and the list.
+function Scanner:Drop(key)
+	local data = self:Data()
+	if data and key then data.items[key] = nil end
+	for _, list in pairs(self.all or {}) do
+		for k = #list, 1, -1 do if list[k].key == key then table.remove(list, k) end end
+	end
+	self:Split()
 end
 -- Every search in the auction house (yours, a shopping list, Search Auction House) brings fresh lowest prices;
 -- they replace the scan's for items with a single variant, so the list doesn't keep a price that has changed.
 local priceSoon
+-- itemID -> keys of the saved scan, built once per scan
+local index
+local function KeysById(data)
+	if index and index.data == data then return index.map end
+	local map = {}
+	for key in pairs(data.items) do
+		local id = tonumber(key:match("^(%d+)"))
+		if id then map[id] = map[id] or {}; table.insert(map[id], key) end
+	end
+	index = { data = data, map = map }
+	return map
+end
 local function TakeBrowsePrices()
 	local data = Scanner:Data()
 	if not data then return end
@@ -444,18 +499,15 @@ local function TakeBrowsePrices()
 		end
 	end
 	if not next(fresh) then return end
-	local keysOf = {}
-	for key in pairs(data.items) do
-		local id = tonumber(key:match("^(%d+)"))
-		if id and fresh[id] then keysOf[id] = keysOf[id] or {}; table.insert(keysOf[id], key) end
-	end
+	local keysOf = KeysById(data)
 	local changed = false
-	for id, keys in pairs(keysOf) do
+	for id, price in pairs(fresh) do
+		local keys = keysOf[id]
 		-- only when the item has one variant on both sides; "of the Owl" and "of the Bear" can't be told apart here
-		if #keys == 1 and variants[id] == 1 then
-			local price, link = data.items[keys[1]]:match("^(%d+)|(.+)$")
-			if tonumber(price) ~= fresh[id] then
-				data.items[keys[1]] = fresh[id] .. "|" .. link
+		if keys and #keys == 1 and variants[id] == 1 and data.items[keys[1]] then
+			local old, link = data.items[keys[1]]:match("^(%d+)|(.+)$")
+			if tonumber(old) ~= price then
+				data.items[keys[1]] = price .. "|" .. link
 				changed = true
 			end
 		end
@@ -467,8 +519,16 @@ local function TakeBrowsePrices()
 end
 Scanner.TakeBrowsePrices = TakeBrowsePrices
 
-GL:On("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", function() OpenPending(); TakeBrowsePrices() end)
-GL:On("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", function() OpenPending(); TakeBrowsePrices() end)
+-- results come a page at a time; their prices are taken at most every 0.3 s
+local browseSoon
+local function OnBrowse()
+	OpenPending()
+	if browseSoon then return end
+	browseSoon = true
+	C_Timer.After(0.3, function() browseSoon = false; TakeBrowsePrices() end)
+end
+GL:On("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", OnBrowse)
+GL:On("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", OnBrowse)
 -- a search the player starts by hand cancels ours
 GL:On("AUCTION_HOUSE_SHOW", function()
 	local bar = AuctionHouseFrame and AuctionHouseFrame.SearchBar
@@ -492,7 +552,7 @@ function Scanner:Find(link)
 	if not (item and key) then return false end
 	local id, suffix = key:match("^(%d+):(%-?%d+)")
 	local query = '"' .. item.name .. '"'
-	local this = { id = tonumber(id), suffix = tonumber(suffix) or 0, untilT = GetTime() + 10 }
+	local this = { id = tonumber(id), suffix = tonumber(suffix) or 0, untilT = GetTime() + 10, key = key, link = link }
 	pending = nil
 	local ok, err = pcall(function()
 		AuctionHouseFrame:SetDisplayMode(AuctionHouseFrameDisplayMode.Buy)

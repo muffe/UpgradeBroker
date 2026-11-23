@@ -23,9 +23,29 @@ end
 ---------------------------------------------------------------------------
 -- Can you use it?
 ---------------------------------------------------------------------------
+-- Armor and weapon type: can this class wear it at wearLevel? Returns ok, reason.
+local function TypeOK(s, classID, sub, equipLoc, wearLevel)
+	local C = GL.Classes
+	if classID == 4 then
+		sub = sub or 0
+		if sub > 0 then
+			if not C.armor[s.class][sub] then return false, "armor" end
+			if sub <= 4 then
+				if C.ArmorLearnLevel(s.class, sub) > wearLevel then return false, "armor" end
+				if GL.db and GL.db.ownArmorOnly and equipLoc ~= "INVTYPE_CLOAK" and sub ~= C.MainArmor(s.class, wearLevel) then
+					return false, "armor"
+				end
+			end
+		end
+	elseif classID == 2 then
+		if not C.weapons[s.class][sub or -1] then return false, "weapon" end
+		if equipLoc == "INVTYPE_WEAPONOFFHAND" and not s.canDualWield then return false, "weapon" end
+	end
+	return true
+end
+
 -- Returns ok, reason. reason "later" = you can wear it within the levels you look ahead (ok is true then).
 function Compare.CanUse(s, item)
-	local C = GL.Classes
 	-- red tooltip lines describe the character you play, not an alt
 	if item.blocked and not s.isAlt then return false, "blocked" end
 	-- a profession item (goggles, fishing poles): only with that profession at that rank
@@ -40,23 +60,27 @@ function Compare.CanUse(s, item)
 	local need = item.reqLevel or 0
 	local later = need > s.level
 	if later and need - s.level > (GL.db and GL.db.levelsAhead or 3) then return false, "level" end
-	local wearLevel = math.max(s.level, need)
-	if item.classID == 4 then
-		local sub = item.subclassID or 0
-		if sub > 0 then
-			if not C.armor[s.class][sub] then return false, "armor" end
-			if sub <= 4 then
-				if C.ArmorLearnLevel(s.class, sub) > wearLevel then return false, "armor" end
-				if GL.db and GL.db.ownArmorOnly and item.equipLoc ~= "INVTYPE_CLOAK" and sub ~= C.MainArmor(s.class, wearLevel) then
-					return false, "armor"
-				end
-			end
-		end
-	elseif item.classID == 2 then
-		if not C.weapons[s.class][item.subclassID or -1] then return false, "weapon" end
-		if item.kind == "ohw" and not s.canDualWield then return false, "weapon" end
-	end
+	local ok, why = TypeOK(s, item.classID, item.subclassID, item.equipLoc, math.max(s.level, need))
+	if not ok then return false, why end
 	return true, later and "later" or nil
+end
+
+-- The reason a scanned item can never be worn, from what the client knows without reading its tooltip, or nil
+-- when it takes a full look. Saves reading thousands of tooltips (plate for a mage) when the scan is rated.
+function Compare.QuickReject(s, link)
+	local _, _, _, equipLoc, _, classID, sub = Items.GetItemInfoInstant(link)
+	if not classID then return nil end
+	local ahead = GL.db and GL.db.levelsAhead or 3
+	local need = select(5, Items.GetItemInfo(link))
+	if need and need - s.level > ahead then return "level" end
+	if need then
+		local ok, why = TypeOK(s, classID, sub, equipLoc, math.max(s.level, need))
+		return not ok and why or nil
+	end
+	-- level not known yet: only what holds at every level you look ahead to
+	local ok, why = TypeOK(s, classID, sub, equipLoc, s.level)
+	if ok or TypeOK(s, classID, sub, equipLoc, s.level + ahead) then return nil end
+	return why
 end
 
 ---------------------------------------------------------------------------
@@ -64,30 +88,23 @@ end
 ---------------------------------------------------------------------------
 local function W(item) return GL.Character.Weapon(item) end
 
--- Weapons and off hands in your bags, for "a one-hander needs something in the other hand".
+-- Weapons and off hands in your bags, for "a one-hander needs something in the other hand". Read once per
+-- snapshot (a bag change that adds or removes one starts a new snapshot).
 local function BagWeapons(s)
-	local list = {}
-	if s.isAlt then
-		for _, link in ipairs(s.bagWeaponLinks or {}) do
-			local item = Items.Get(link)
-			local ok, why
-			if item then ok, why = Compare.CanUse(s, item) end
+	if s.bagWeaponItems then return s.bagWeaponItems end
+	local list, complete = {}, true
+	local links = s.isAlt and (s.bagWeaponLinks or {}) or GL.Character.BagWeaponLinks()
+	for _, link in ipairs(links) do
+		local item = Items.Get(link)
+		if item then
+			local ok, why = Compare.CanUse(s, item)
 			if ok and why ~= "later" then list[#list + 1] = item end
-		end
-		return list
-	end
-	local numSlots = C_Container and C_Container.GetContainerNumSlots
-	local getLink = C_Container and C_Container.GetContainerItemLink
-	if not (numSlots and getLink) then return list end
-	for bag = 0, (NUM_BAG_SLOTS or 4) do
-		for slot = 1, numSlots(bag) or 0 do
-			local item = Items.Get(getLink(bag, slot))
-			if item and item.slots and (item.slots[1] == 16 or item.slots[1] == 17) and Compare.CanUse(s, item) then
-				local _, why = Compare.CanUse(s, item)
-				if why ~= "later" then list[#list + 1] = item end
-			end
+		else
+			complete = false
 		end
 	end
+	-- an item the client is still loading: look again next time
+	if complete then s.bagWeaponItems = list end
 	return list
 end
 

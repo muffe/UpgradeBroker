@@ -261,24 +261,36 @@ function Character:Save()
 		-- this character's own choices win; one made from another character is kept until it sets its own
 		-- the spec this character plays now; a pick made for it from another character ends with this login
 		specKey = s.spec.key, spec = nil, mode = GL.cdb.mode or old.mode, stats = Copy(s.stats), conv = Copy(s.conv),
-		canDualWield = s.canDualWield, skills = s.skills, equipped = {}, bagWeapons = {} }
+		canDualWield = s.canDualWield, skills = s.skills, equipped = {}, bagWeapons = Character.BagWeaponLinks() }
 	for slot, item in pairs(s.equipped) do d.equipped[slot] = item.link end
-	local numSlots = C_Container and C_Container.GetContainerNumSlots
-	local getLink = C_Container and C_Container.GetContainerItemLink
-	if numSlots and getLink then
-		for bag = 0, (NUM_BAG_SLOTS or 4) do
-			for slot = 1, numSlots(bag) or 0 do
-				local link = getLink(bag, slot)
-				-- decided from instant item data, so a weapon the client hasn't loaded yet is kept as well
-				local equipLoc
-				if link then equipLoc = select(4, GL.Items.GetItemInfoInstant(link)) end
-				local slots = equipLoc and GL.Items.EQUIP[equipLoc]
-				if slots and (slots[1] == 16 or slots[1] == 17) then d.bagWeapons[#d.bagWeapons + 1] = link end
-			end
-		end
-	end
 	realm[name] = d
 end
+
+-- Links of the weapons, shields and off hands in your bags. Decided from instant item data, so a weapon the
+-- client hasn't loaded yet is kept as well.
+function Character.BagWeaponLinks()
+	local out = {}
+	local numSlots = C_Container and C_Container.GetContainerNumSlots
+	local getLink = C_Container and C_Container.GetContainerItemLink
+	if not (numSlots and getLink) then return out end
+	for bag = 0, (NUM_BAG_SLOTS or 4) do
+		for slot = 1, numSlots(bag) or 0 do
+			local link = getLink(bag, slot)
+			local equipLoc = link and select(4, GL.Items.GetItemInfoInstant(link))
+			local slots = equipLoc and GL.Items.EQUIP[equipLoc]
+			if slots and (slots[1] == 16 or slots[1] == 17) then out[#out + 1] = link end
+		end
+	end
+	return out
+end
+
+-- a weapon into or out of your bags changes what a one-hander pairs with; other loot changes nothing
+local lastBagWeapons
+GL:On("BAG_UPDATE_DELAYED", function()
+	local now = table.concat(Character.BagWeaponLinks(), ";")
+	if lastBagWeapons and now ~= lastBagWeapons then GL:Invalidate() end
+	lastBagWeapons = now
+end)
 
 -- Your other characters on this realm and faction, newest first: { name, class, level, time }.
 function Character:Alts()

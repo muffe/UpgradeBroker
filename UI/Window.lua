@@ -104,6 +104,8 @@ local function MakeSlotRow(parent)
 		GameTooltip:Hide()
 	end)
 	r:SetScript("OnClick", function(self)
+		-- Shift-click links the item in chat, Ctrl-click tries it on
+		if self.entry and HandleModifiedItemClick and HandleModifiedItemClick(self.entry.link) then return end
 		selectedGroup, selectedLink, candOffset = self.group, nil, 0
 		Window:Refresh()
 	end)
@@ -133,7 +135,10 @@ local function MakeCandRow(parent)
 		if not self.selected then self.hl:SetVertexColor(1, 1, 1, 0) end
 		GameTooltip:Hide()
 	end)
-	r:SetScript("OnClick", function(self) selectedLink = self.entry and self.entry.link; Window:Refresh() end)
+	r:SetScript("OnClick", function(self)
+		if self.entry and HandleModifiedItemClick and HandleModifiedItemClick(self.entry.link) then return end
+		selectedLink = self.entry and self.entry.link; Window:Refresh()
+	end)
 	-- the rows cover the list, so they pass the wheel on
 	r:EnableMouseWheel(true)
 	r:SetScript("OnMouseWheel", function(self, delta) self:GetParent():GetScript("OnMouseWheel")(self:GetParent(), delta) end)
@@ -162,7 +167,12 @@ local function Build()
 	top:EnableMouse(true)
 	top:RegisterForDrag("LeftButton")
 	top:SetScript("OnDragStart", function() if not f.inAH then f:StartMoving() end end)
-	top:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+	top:SetScript("OnDragStop", function()
+		f:StopMovingOrSizing()
+		-- the free window opens where you left it
+		local point, _, rel, x, y = f:GetPoint()
+		if not f.inAH and point then GL.db.windowPos = { point, rel, x, y } end
+	end)
 	f.top = top
 
 	local title = T.Text(top, 15, C.text, true)
@@ -207,12 +217,7 @@ local function Build()
 	f.scan = T.Button(top, "Scan", 64, 24)
 	f.scan:SetPoint("RIGHT", f.close, "LEFT", -8, 0)
 	if f.scan.SetMotionScriptsWhileDisabled then f.scan:SetMotionScriptsWhileDisabled(true) end
-	f.scan:SetScript("OnClick", function()
-		local ok, why, left = Scanner:Start()
-		if not ok and why == "cooldown" then
-			GL:Print(("You can scan the Auction House once every 15 minutes. Try again in %d min."):format(math.ceil(left / 60)))
-		end
-	end)
+	f.scan:SetScript("OnClick", function() Scanner:Start() end)
 	f.scan:SetScript("OnEnter", function(self)
 		self:Refresh()
 		local ok, why, left = Scanner:CanScan()
@@ -277,7 +282,7 @@ local function Build()
 		function() return StepOf(GL.db.maxPrice) end,
 		function(step)
 			GL.db.maxPrice = PRICE_STEPS[step]
-			Scanner:Rate()
+			Scanner:SetMaxPrice()
 		end,
 		function(step)
 			local v = GL.db.maxPrice
@@ -287,7 +292,7 @@ local function Build()
 		function(text)
 			-- typed prices are kept exactly (12g stays 12g); the slider shows the nearest step
 			local step = ParsePrice(text)
-			if step then Scanner:Rate() end
+			if step then Scanner:SetMaxPrice() end
 			return nil
 		end)
 	f.price:SetPoint("LEFT", priceLabel, "RIGHT", 12, 0)
@@ -455,6 +460,15 @@ local function Build()
 		Window:Refresh()
 	end)
 	f:SetScript("OnSizeChanged", function() Window:Layout() end)
+	f:SetScript("OnHide", function()
+		-- no rating with the window closed: a pass that was running starts over when it opens again
+		if Scanner.state == "rating" or Scanner.state == "loading" or Scanner.state == "items" then
+			Scanner:CancelRating()
+			Scanner.stale = true
+		end
+		-- the ratings of every scanned item; tooltips and bags rate the few they show again
+		GL.Compare:ClearCache()
+	end)
 end
 
 ---------------------------------------------------------------------------
@@ -517,9 +531,18 @@ local function FillHeader()
 	local busy = st ~= "idle"
 	f.progress:SetShown(busy)
 	if busy then f.progress:SetWidth(math.max(1, f.top:GetWidth() * (st == "waiting" and 0.02 or Scanner.progress))) end
-	local can = Scanner:CanScan()
-	f.scan:SetEnabled(Scanner.ahOpen and not busy)
-	f.scan:SetLabel((st == "waiting" or st == "reading") and "Wait..." or "Scan")
+	local can, why, left = Scanner:CanScan()
+	local cooldown = why == "cooldown"
+	f.scan:SetEnabled(Scanner.ahOpen and not busy and not cooldown)
+	if st == "waiting" or st == "reading" then f.scan:SetLabel("Wait...")
+	elseif cooldown and Scanner.ahOpen then
+		f.scan:SetLabel(("%d min"):format(math.ceil(left / 60)))
+		-- count down while the window is open
+		if not f.tick then
+			f.tick = true
+			C_Timer.After((left - 1) % 60 + 1, function() f.tick = false; Window:Refresh() end)
+		end
+	else f.scan:SetLabel("Scan") end
 	-- the scan only asks for attention when there is nothing recent to show
 	f.scan:SetPrimary(can and (not age or age > 2 * 3600))
 	f.close:SetShown(not f.inAH)
@@ -924,7 +947,8 @@ function Window:Mount(host)
 	else
 		f:SetParent(UIParent)
 		f:SetSize(800, 540)
-		f:SetPoint("CENTER")
+		local p = GL.db.windowPos
+		if p then f:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else f:SetPoint("CENTER") end
 		f:SetFrameStrata("HIGH")
 		f.inAH = false
 		f.border.TOP:Show()

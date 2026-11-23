@@ -439,6 +439,83 @@ try("no rating while the window is closed", function()
 	assert(rated > 0 and not GL.Scanner.stale, "rates when the window opens")
 	GL.Compare.Rate = orig
 end)
+try("closing the window stops a rating in progress", function()
+	GL.Window:Show()
+	GL.Character:Invalidate(); GL.Compare:ClearCache()
+	-- one item per slice, and slices wait for the next frame
+	local queue, clock = {}, 0
+	local realAfter, realClock = C_Timer.After, debugprofilestop
+	C_Timer.After = function(d, fn) table.insert(queue, fn) end
+	debugprofilestop = function() clock = clock + 5 return clock end
+	GL.Scanner:Rate()
+	assert(GL.Scanner.state == "rating", "rating started: " .. tostring(GL.Scanner.state))
+	local rated = 0
+	local orig = GL.Compare.Rate
+	GL.Compare.Rate = function(...) rated = rated + 1 return orig(...) end
+	GL.Window:Hide()
+	for _, fn in ipairs(queue) do fn() end
+	C_Timer.After, debugprofilestop = realAfter, realClock
+	GL.Compare.Rate = orig
+	assert(rated == 0, "rated " .. rated .. " items after the window closed")
+	assert(GL.Scanner.stale and GL.Scanner.state == "idle", "starts over on the next open")
+	GL.Window:Show()
+	assert(not GL.Scanner.stale and GL.Scanner.results, "rated on open")
+end)
+try("a new max price needs no new rating", function()
+	local rated = 0
+	local orig = GL.Compare.Rate
+	GL.Compare.Rate = function(...) rated = rated + 1 return orig(...) end
+	GL.db.maxPrice = 20000
+	GL.Scanner:SetMaxPrice()
+	assert(rated == 0, "rated " .. rated)
+	assert(not (GL.Scanner.results or {}).CHEST and GL.Scanner.above.CHEST, "robes above 2g")
+	GL.db.maxPrice = 1e12
+	GL.Scanner:SetMaxPrice()
+	assert(GL.Scanner.results.CHEST and not GL.Scanner.above.CHEST, "robes back in the list")
+	GL.Compare.Rate = orig
+end)
+try("gain order has no cycle", function()
+	local cmp = GL.Scanner.Better("gain")
+	local a, b, c = { gain = 0.60, price = 1 }, { gain = 0.64, price = 2 }, { gain = 0.68, price = 3 }
+	assert(not (cmp(a, b) and cmp(b, c) and cmp(c, a)))
+end)
+try("gear changes in combat wait for the fight to end", function()
+	local changed = 0
+	GL:On("GL_CHANGED", function() changed = changed + 1 end)
+	InCombatLockdown = function() return true end
+	GL:Fire("PLAYER_EQUIPMENT_CHANGED")
+	assert(changed == 0, "changed in combat")
+	InCombatLockdown = function() return false end
+	GL:Fire("PLAYER_REGEN_ENABLED")
+	assert(changed == 1, "changed after combat: " .. changed)
+end)
+try("bags are read once per snapshot for one-handers", function()
+	T.equipped[16] = T.Item("staff", { name = "Staff", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 10, stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 20 } })
+	GL.Character:Invalidate(); GL.Compare:ClearCache()
+	local reads = 0
+	local realNum = C_Container.GetContainerNumSlots
+	C_Container.GetContainerNumSlots = function(bag) reads = reads + 1 return 0 end
+	for i = 1, 5 do
+		GL.Compare:Rate(T.Item("dagger" .. i, { name = "Dagger " .. i, equipLoc = "INVTYPE_WEAPON", classID = 2, subclassID = 15, stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 10 + i } }))
+	end
+	C_Container.GetContainerNumSlots = realNum
+	T.equipped[16] = nil
+	GL.Character:Invalidate(); GL.Compare:ClearCache()
+	assert(reads <= 5, "bag reads: " .. reads)
+end)
+try("a sold item leaves the list", function()
+	GL:Fire("AUCTION_HOUSE_SHOW")
+	AuctionHouseFrame:Show()
+	local ring = GL.Scanner.results.RING[1]
+	C_AuctionHouse.GetBrowseResults = function() return {} end
+	C_AuctionHouse.HasFullBrowseResults = function() return true end
+	AuctionHouseFrame.SearchBar.StartSearch = function() end
+	assert(GL.Scanner:Find(ring.link), "search started")
+	GL:Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+	assert(not GL.Scanner:Data().items[ring.key], "gone from the scan")
+	for _, e in ipairs(GL.Scanner.results.RING or {}) do assert(e.key ~= ring.key, "gone from the list") end
+	GL:Fire("AUCTION_HOUSE_CLOSED")
+end)
 try("debug dump", function() GL.Character:Dump() end)
 try("explain", function() GL.Compare:Explain(res.CHEST[1].link) end)
 
