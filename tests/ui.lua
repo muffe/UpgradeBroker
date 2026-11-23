@@ -101,6 +101,14 @@ C_Item.GetItemInfoInstant = (function(orig)
 end)(C_Item.GetItemInfoInstant)
 
 ---------------------------------------------------------------------------
+-- Blizzard's settings (no EllesmereUI in these tests)
+local registered, openedID
+Settings = {
+	RegisterCanvasLayoutCategory = function(frame, name) return { frame = frame, name = name, GetID = function() return 42 end } end,
+	RegisterAddOnCategory = function(c) registered = c end,
+	OpenToCategory = function(id) openedID = id end,
+}
+
 -- Load in TOC order
 ---------------------------------------------------------------------------
 local GL = {}
@@ -333,6 +341,29 @@ try("the ? button opens the scoring page", function()
 	assert(GL.Info.overlay and GL.Info.overlay:IsShown(), "overlay shown")
 	UpgradeBrokerFrame.info:Click()
 	assert(not GL.Info.overlay:IsShown(), "overlay hidden again")
+end)
+try("the gear button opens the settings in the window", function()
+	GL.Window:Show()
+	UpgradeBrokerFrame.info:Click()
+	UpgradeBrokerFrame.gear:Click()
+	assert(GL.Options.overlay and GL.Options.overlay:IsShown(), "settings shown")
+	assert(not GL.Info.overlay:IsShown(), "one page at a time")
+	UpgradeBrokerFrame.gear:Click()
+	assert(not GL.Options.overlay:IsShown(), "settings hidden again")
+end)
+try("without EllesmereUI the settings are under Esc > Options > AddOns", function()
+	assert(registered and registered.name == "Upgrade Broker", "category registered")
+	GL:OpenOptions()
+	assert(openedID == 42, "/ub options opens it")
+end)
+try("/ub set toggles a setting", function()
+	local before = GL.db.bagMarkers
+	SlashCmdList.UPGRADEBROKER("set bagmarkers")
+	assert(GL.db.bagMarkers == not before)
+	SlashCmdList.UPGRADEBROKER("set itempct")
+	assert(GL.db.itemPct == true)
+	SlashCmdList.UPGRADEBROKER("set itempct")
+	GL.db.bagMarkers = before
 end)
 try("no realm name (WoW Forever): characters are still saved and listed", function()
 	local real = GetRealmName

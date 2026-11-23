@@ -228,11 +228,7 @@ local function Build()
 	-- "?": how the scores are worked out, over the window's body
 	f.info = T.Button(top, "?", 24, 24)
 	f.info:SetPoint("RIGHT", f.scan, "LEFT", -6, 0)
-	f.info:SetScript("OnClick", function()
-		local o = GL.Info.Overlay(f.body)
-		o:SetShown(not o:IsShown())
-		f.info:SetPrimary(o:IsShown())
-	end)
+	f.info:SetScript("OnClick", function() Window:ShowPage("info") end)
 	f.info:SetScript("OnEnter", function(self)
 		self:Refresh()
 		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -240,7 +236,22 @@ local function Build()
 		GameTooltip:Show()
 	end)
 	f.info:SetScript("OnLeave", function(self) self:Refresh(); GameTooltip:Hide() end)
-	f.status:SetPoint("RIGHT", f.info, "LEFT", -10, 0)
+	-- gear: the settings, over the window's body the same way (also in the auction house)
+	f.gear = T.Button(top, "", 24, 24)
+	f.gear:SetPoint("RIGHT", f.info, "LEFT", -6, 0)
+	f.gear.icon = f.gear:CreateTexture(nil, "OVERLAY")
+	f.gear.icon:SetSize(14, 14); f.gear.icon:SetPoint("CENTER")
+	f.gear.icon:SetTexture(T.GEAR)
+	f.gear.icon:SetVertexColor(1, 1, 1, 0.65)
+	f.gear:SetScript("OnClick", function() Window:ShowPage("settings") end)
+	f.gear:SetScript("OnEnter", function(self)
+		self:Refresh()
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		GameTooltip:AddLine("Settings")
+		GameTooltip:Show()
+	end)
+	f.gear:SetScript("OnLeave", function(self) self:Refresh(); GameTooltip:Hide() end)
+	f.status:SetPoint("RIGHT", f.gear, "LEFT", -10, 0)
 	f.status:SetPoint("LEFT", f.mode, "RIGHT", 8, 0) -- long texts are cut instead of running over the toggle
 	f.status:SetJustifyH("RIGHT")
 
@@ -836,6 +847,20 @@ local function FillDetail()
 	if e.item.effect then notes[#notes + 1] = "Special effects are not counted." end
 	if e.item.set then notes[#notes + 1] = "Set bonuses are not counted." end
 	w.note:SetText(table.concat(notes, "  "))
+end
+
+-- "info" (How scores work) or "settings" over the window's body; the same button again closes it.
+function Window:ShowPage(which)
+	local info = GL.Info.Overlay(f.body)
+	local settings = GL.Options.Overlay(f.body)
+	local open = (which == "info" and not info:IsShown()) and info or (which == "settings" and not settings:IsShown()) and settings or nil
+	info:SetShown(open == info)
+	settings:SetShown(open == settings)
+	if open == settings then settings.Refresh() end
+	f.info:SetPrimary(open == info)
+	f.gear:SetPrimary(open == settings)
+	local c = open == settings and C.accent or { 1, 1, 1, 0.65 }
+	f.gear.icon:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
 end
 
 function Window:Refresh()

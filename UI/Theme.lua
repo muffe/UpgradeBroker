@@ -30,6 +30,9 @@ T.FONT = MEDIA .. "fonts\\Expressway.TTF"
 -- EllesmereUI's down arrow, else Blizzard's
 T.ARROW_DOWN = (C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUI"))
 	and (MEDIA .. "icons\\eui-arrow-down3.png") or "Interface\\Buttons\\Arrow-Down-Up"
+-- EllesmereUI's gear icon, else Blizzard's
+T.GEAR = (C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUI"))
+	and (MEDIA .. "icons\\settings.png") or "Interface\\Buttons\\UI-OptionsButton"
 T.FONT_BOLD = MEDIA .. "fonts\\Expressway Bold.ttf"
 
 local accentWatchers = {}
@@ -343,6 +346,27 @@ function T.Slider(parent, w, minV, maxV, get, set, format, parse)
 	f.slider, f.box = s, box
 	f:Refresh()
 	return f
+end
+
+-- On/off switch: a short track with a knob, accent when on. set(on).
+function T.Switch(parent, get, set)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetSize(30, 16)
+	b.track = T.Fill(b, { 1, 1, 1, 0.16 })
+	b.knob = b:CreateTexture(nil, "OVERLAY")
+	b.knob:SetTexture(WHITE)
+	b.knob:SetSize(12, 12)
+	function b:Refresh()
+		local on, a = get(), T.C.accent
+		self.knob:ClearAllPoints()
+		self.knob:SetPoint(on and "RIGHT" or "LEFT", on and -2 or 2, 0)
+		self.knob:SetVertexColor(1, 1, 1, on and 1 or 0.7)
+		if on then self.track:SetVertexColor(a[1], a[2], a[3], 0.75) else self.track:SetVertexColor(1, 1, 1, 0.16) end
+	end
+	b:SetScript("OnClick", function(self) set(not get()); self:Refresh() end)
+	T.OnAccent(function() b:Refresh() end)
+	b:Refresh()
+	return b
 end
 
 -- Close (X) glyph button.
