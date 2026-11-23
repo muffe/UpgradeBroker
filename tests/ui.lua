@@ -303,6 +303,25 @@ try("a search in the auction house updates the scan's price", function()
 	assert(GL.Scanner:Data().items[key]:match("^(%d+)") == "39900", GL.Scanner:Data().items[key])
 	C_AuctionHouse.GetBrowseResults = function() return {} end
 end)
+try("a search tells variants apart by name", function()
+	local data = GL.Scanner:Data()
+	local owl = "|cff1eff00|Hitem:301::::::::35:::1:12729|h[Cape of the Owl]|h|r"
+	local bear = "|cff1eff00|Hitem:301::::::::35:::1:12730|h[Cape of the Bear]|h|r"
+	for _, l in ipairs({ owl, bear }) do
+		T.Item(l, { name = l:match("%[(.-)%]"), equipLoc = "INVTYPE_CLOAK", classID = 4, subclassID = 1, stats = { ITEM_MOD_STAMINA_SHORT = 3 } })
+		data.items[GL.Scanner.KeyOf(l)] = "50000|" .. l
+	end
+	GL.Scanner.version = (GL.Scanner.version or 0) + 1
+	C_AuctionHouse.GetBrowseResults = function()
+		return { { itemKey = { itemID = 301, itemSuffix = 14310 }, minPrice = 12300, totalQuantity = 1 } }
+	end
+	C_AuctionHouse.GetItemKeyInfo = function(k) return k.itemSuffix == 14310 and { itemName = "Cape of the Bear" } or nil end
+	GL:Fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+	assert(data.items[GL.Scanner.KeyOf(bear)]:match("^(%d+)") == "12300", "the Bear got the new price")
+	assert(data.items[GL.Scanner.KeyOf(owl)]:match("^(%d+)") == "50000", "the Owl kept its price")
+	C_AuctionHouse.GetBrowseResults = function() return {} end
+	C_AuctionHouse.GetItemKeyInfo = nil
+end)
 try("a slot with nothing under the limit shows where upgrades start", function()
 	T.Reset({ level = 35, class = "WARLOCK", className = "Warlock", stats = { 30, 35, 80, 110, 105 }, hp = 1300, mana = 1800,
 		spAll = 20, scrit = 6, armor = 420, regen = 14, regenIC = 0 })

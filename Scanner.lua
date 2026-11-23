@@ -198,7 +198,7 @@ ReadLate = function()
 		if i < #rows then C_Timer.After(0, step) return end
 		lateBusy = false
 		job.rows = still
-		if #found > 0 then Scanner:RateMore(found) end
+		if #found > 0 then Scanner.version = (Scanner.version or 0) + 1; Scanner:RateMore(found) end
 		if #still == 0 then late = nil return end
 		-- the game may load items without telling; keep looking while that finds some
 		if (#found > 0 or lateAgain) and not lateSoon then
@@ -591,52 +591,59 @@ function Scanner:Drop(key)
 	end
 	self:Split()
 end
--- Every search in the auction house (yours, a shopping list, Search Auction House) brings fresh lowest prices;
--- they replace the scan's for items with a single variant, so the list doesn't keep a price that has changed.
-local priceSoon
--- itemID -> keys of the saved scan, built once per scan
+-- Every search in the auction house (yours, a shopping list, Search Auction House) brings fresh lowest prices
+-- that replace the scan's. Variants ("of the Owl", "of the Bear") are told apart by name: item ID and name are
+-- unique among the scanned kinds.
+-- itemID -> { [name] = key } of the saved scan, built again when the scan changes
 local index
 local function KeysById(data)
-	if index and index.data == data then return index.map end
+	if index and index.data == data and index.version == Scanner.version then return index.map end
 	local map = {}
-	for key in pairs(data.items) do
+	for key, e in pairs(data.items) do
 		local id = tonumber(key:match("^(%d+)"))
-		if id then map[id] = map[id] or {}; table.insert(map[id], key) end
+		local name = e:match("|h%[(.-)%]|h")
+		if id and name then map[id] = map[id] or {}; map[id][name] = key end
 	end
-	index = { data = data, map = map }
+	index = { data = data, version = Scanner.version, map = map }
 	return map
 end
 local function TakeBrowsePrices()
 	local data = Scanner:Data()
 	if not data then return end
 	local ok, results = pcall(AH.GetBrowseResults)
-	if not ok or type(results) ~= "table" then return end
-	local fresh, variants = {}, {}
+	if not ok or type(results) ~= "table" or #results == 0 then return end
+	local keysOf = KeysById(data)
+	-- results per item ID, for items whose name the game hasn't loaded yet
+	local variants = {}
 	for _, r in ipairs(results) do
 		local id = r.itemKey and r.itemKey.itemID
-		if id and r.minPrice and r.minPrice > 0 then
-			variants[id] = (variants[id] or 0) + 1
-			fresh[id] = r.minPrice
-		end
+		if id then variants[id] = (variants[id] or 0) + 1 end
 	end
-	if not next(fresh) then return end
-	local keysOf = KeysById(data)
-	local changed = false
-	for id, price in pairs(fresh) do
-		local keys = keysOf[id]
-		-- only when the item has one variant on both sides; "of the Owl" and "of the Bear" can't be told apart here
-		if keys and #keys == 1 and variants[id] == 1 and data.items[keys[1]] then
-			local old, link = data.items[keys[1]]:match("^(%d+)|(.+)$")
-			if tonumber(old) ~= price then
-				data.items[keys[1]] = price .. "|" .. link
-				changed = true
+	local changed = {}
+	for _, r in ipairs(results) do
+		local k, price = r.itemKey, r.minPrice
+		local names = k and keysOf[k.itemID]
+		if names and price and price > 0 then
+			local okInfo, info = pcall(AH.GetItemKeyInfo or function() end, k)
+			local name = okInfo and type(info) == "table" and info.itemName
+			local key = name and names[name]
+			if not name and variants[k.itemID] == 1 then
+				-- one kind in the scan and one in the results: the same, name or not
+				local only, n = nil, 0
+				for _, kk in pairs(names) do only, n = kk, n + 1 end
+				if n == 1 then key = only end
+			end
+			local e = key and data.items[key]
+			if e then
+				local old, link = e:match("^(%d+)|(.+)$")
+				if tonumber(old) ~= price then
+					data.items[key] = price .. "|" .. link
+					changed[#changed + 1] = key
+				end
 			end
 		end
 	end
-	if changed and not priceSoon then
-		priceSoon = true
-		C_Timer.After(0.5, function() priceSoon = false; if Scanner.state == "idle" then Scanner:Rate() end end)
-	end
+	if #changed > 0 then Scanner:RateMore(changed) end
 end
 Scanner.TakeBrowsePrices = TakeBrowsePrices
 
