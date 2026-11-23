@@ -14,7 +14,11 @@ local SLOT_NAMES = {
 Compare.SLOT_NAMES = SLOT_NAMES
 
 local caches = setmetatable({}, { __mode = "k" }) -- [snapshot] = { [link] = result }
-function Compare:ClearCache() caches = setmetatable({}, { __mode = "k" }) end
+local worth = setmetatable({}, { __mode = "k" })  -- [snapshot] = { [links of worn items] = percent they add }
+function Compare:ClearCache()
+	caches = setmetatable({}, { __mode = "k" })
+	worth = setmetatable({}, { __mode = "k" })
+end
 
 ---------------------------------------------------------------------------
 -- Can you use it?
@@ -198,6 +202,53 @@ end
 -- Is it worth calling an upgrade?
 function Compare.IsUpgrade(res)
 	return res and res.ok and res.gain and res.gain.total >= ((GL.db and GL.db.minGain) or 0.5)
+end
+
+-- How big a gain is for one item. One item rarely moves the whole character more than 1 to 3 %.
+function Compare.SizeLabel(p)
+	if p >= 2 then return "Big upgrade" end
+	if p >= 0.8 then return "Good upgrade" end
+	return "Minor upgrade"
+end
+
+-- What the worn items add to the character, in percent (taking them off loses that much).
+local function Worth(s, items)
+	local keys = {}
+	for i, it in ipairs(items) do keys[i] = it.link or tostring(it) end
+	local key = table.concat(keys, ";")
+	local cache = worth[s]
+	if not cache then cache = {}; worth[s] = cache end
+	if cache[key] == nil then
+		local eq, weapons = s.equipped, {}
+		for _, it in ipairs(items) do
+			if it == eq[16] then weapons.mh = false elseif it == eq[17] then weapons.oh = false
+			elseif it == eq[18] then weapons.ranged = false end
+		end
+		local x = Model.Apply(s, Model.Calibrate(s).x0, nil, items, next(weapons) and weapons or nil)
+		cache[key] = -Model.Gain(s, x).total
+	end
+	return cache[key]
+end
+
+-- Item vs worn: how much more the new item adds than the worn one, both measured on your character.
+-- nil when the slot is empty or the worn item adds (next to) nothing.
+function Compare.ItemGain(s, total, replaced)
+	if not (s and replaced and #replaced > 0) then return nil end
+	local w = Worth(s, replaced)
+	if w < 0.05 then return nil end
+	return total / w * 100
+end
+
+-- The percent shown for one item: the whole-character gain, or item vs worn when that's chosen in the settings.
+-- entry: one of res.perSlot (a ring's other slot) instead of the best option.
+function Compare.PctText(res, entry, decimals)
+	local e = entry or res
+	if GL.db and GL.db.itemPct then
+		local p = Compare.ItemGain(res.snap, e.gain.total, e.replaced)
+		if not p then return "New" end
+		return GL.Pct(math.min(p, 999))
+	end
+	return GL.Pct(e.gain.total, nil, decimals)
 end
 
 -- The stats that change: { { key, delta } }, biggest change in value first is not knowable per stat,

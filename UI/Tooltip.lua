@@ -21,15 +21,15 @@ local function Add(tip, res)
 	end
 	if g.total < ((GL.db and GL.db.minGain) or 0.5) and g.total > 0 then
 		-- too small to call an upgrade: shown, but quiet
-		tip:AddDoubleLine(brand, Hex(C.sec) .. GL.Pct(g.total) .. "|r")
+		tip:AddDoubleLine(brand, Hex(C.sec) .. GL.Compare.PctText(res) .. "|r")
 		return
 	end
 	if g.total < 0 then
 		-- a downgrade stays quiet
-		tip:AddDoubleLine(brand, Hex(C.sec) .. GL.Pct(g.total) .. "|r")
+		tip:AddDoubleLine(brand, Hex(C.sec) .. GL.Compare.PctText(res) .. "|r")
 		return
 	end
-	local right = Hex(color) .. GL.Pct(g.total) .. " upgrade|r"
+	local right = Hex(color) .. GL.Compare.PctText(res) .. " (" .. GL.Compare.SizeLabel(g.total) .. ")|r"
 	if res.reason == "later" then right = Hex(C.warn) .. "Level " .. res.item.reqLevel .. "  |r" .. right end
 	tip:AddDoubleLine(brand, right)
 	-- why: the stats that make the difference, with their share
@@ -57,7 +57,7 @@ local function Add(tip, res)
 		for _, e in ipairs(res.perSlot) do
 			local name = e.replaced[1] and e.replaced[1].name or "Empty"
 			tip:AddDoubleLine(Hex(C.dim) .. e.label .. ": " .. Hex(C.sec) .. name .. "|r",
-				Hex(e.gain.total < 0 and C.sec or T.GainColor(e.gain.total, res.reason == "later")) .. GL.Pct(e.gain.total) .. "|r")
+				Hex(e.gain.total < 0 and C.sec or T.GainColor(e.gain.total, res.reason == "later")) .. GL.Compare.PctText(res, e) .. "|r")
 		end
 	end
 end

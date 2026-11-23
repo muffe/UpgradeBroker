@@ -23,6 +23,9 @@ local function BuildPage(page, parent, y)
 			function(v) db.bagMarkers = v; if not pre then GL.Bags:Refresh() end end); y = y - h
 		_, h = W:Toggle(parent, "Upgrade badges on quest rewards", y, function() return db.questMarkers end,
 			function(v) db.questMarkers = v end); y = y - h
+		_, h = W:Dropdown(parent, "Upgrade percentage", y, { character = "Whole character", item = "Item vs. worn" },
+			function() return db.itemPct and "item" or "character" end,
+			function(v) db.itemPct = v == "item"; Changed(true) end, { "character", "item" }); y = y - h
 
 		_, h = W:SectionHeader(parent, "SCORING", y); y = y - h
 		local specs, order = {}, {}
@@ -69,7 +72,7 @@ end
 
 -- Without EllesmereUI
 local TOGGLES = { tooltip = "Upgrades in item tooltips", bagMarkers = "Upgrade badges in bags", questMarkers = "Upgrade badges on quest rewards",
-	ownArmorOnly = "Only my main armor type" }
+	ownArmorOnly = "Only my main armor type", itemPct = "Upgrade percentage: Item vs. worn" }
 function Options:Open()
 	GL:Print("Settings (type /ub set <name> to toggle):")
 	for k, label in pairs(TOGGLES) do GL:Print(("  %s  %s: %s"):format(k, label, GL.db[k] and "on" or "off")) end

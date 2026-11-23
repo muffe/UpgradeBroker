@@ -289,8 +289,20 @@ local function Build()
 	end, 22)
 	f.order:SetPoint("TOPLEFT", 12, -44)
 
+	-- every upgrade the list shows, worn together, and what they cost
+	local foot = CreateFrame("Frame", nil, left)
+	foot:SetPoint("BOTTOMLEFT", 0, 0); foot:SetPoint("BOTTOMRIGHT", -1, 0); foot:SetHeight(32)
+	T.Line(foot, "TOP", C.border)
+	foot.price = T.Text(foot, 11.5, C.dim)
+	foot.price:SetPoint("RIGHT", -12, 0); foot.price:SetJustifyH("RIGHT"); foot.price:SetWidth(60)
+	foot.gain = T.Text(foot, 12.5, C.up, true)
+	foot.gain:SetPoint("RIGHT", -58, 0); foot.gain:SetJustifyH("RIGHT"); foot.gain:SetWidth(44)
+	foot.label = T.Text(foot, 12, C.dim)
+	foot.label:SetPoint("LEFT", 12, 0); foot.label:SetPoint("RIGHT", foot.gain, "LEFT", -6, 0)
+	f.foot = foot
+
 	f.list = CreateFrame("Frame", nil, left)
-	f.list:SetPoint("TOPLEFT", 0, -76); f.list:SetPoint("BOTTOMRIGHT", -1, 6)
+	f.list:SetPoint("TOPLEFT", 0, -76); f.list:SetPoint("BOTTOMRIGHT", foot, "TOPRIGHT", 0, 4)
 	for i = 1, #Scanner.GROUPS do rows[i] = MakeSlotRow(f.list) end
 
 	-- right: what you wear, the options, and why
@@ -367,7 +379,7 @@ local function Build()
 	why.metric:SetPoint("RIGHT", why, "RIGHT", -176, 0)
 	-- two lines when needed ("Needs level 37 (Hex is 35)" on the narrow auction house view)
 	why.metric:SetWordWrap(true)
-	if why.metric.SetMaxLines then why.metric:SetMaxLines(2) end
+	if why.metric.SetMaxLines then why.metric:SetMaxLines(3) end
 	why.vs = T.Text(why, 11.5, C.sec)
 	why.vs:SetPoint("TOPLEFT", why.metric, "BOTTOMLEFT", 0, -3)
 	why.vs:SetPoint("RIGHT", why, "RIGHT", -176, 0)
@@ -444,7 +456,7 @@ function Window:Layout()
 	for i, r in ipairs(candRows) do if i > rowsShown then r:Hide() end end
 	local listH = f.list:GetHeight()
 	local n = #Scanner.GROUPS
-	local h = math.max(20, math.min(28, math.floor(listH / n)))
+	local h = math.max(18, math.min(28, math.floor(listH / n)))
 	for i, r in ipairs(rows) do
 		r:ClearAllPoints()
 		r:SetPoint("TOPLEFT", 0, -(i - 1) * h)
@@ -464,9 +476,10 @@ local function Age(sec)
 	return ("%dd ago"):format(sec / 86400)
 end
 
-local function SetGainText(fs, gain, later, decimals)
-	fs:SetText(GL.Pct(gain, nil, decimals))
-	T.Color(fs, T.GainColor(gain, later))
+-- an entry's percent (whole character, or item vs worn when chosen), colored by its whole-character gain
+local function SetGainText(fs, e, decimals)
+	fs:SetText(GL.Compare.PctText(e.res, nil, decimals))
+	T.Color(fs, T.GainColor(e.gain, e.later))
 end
 
 local function FillHeader()
@@ -530,7 +543,7 @@ local function FillList()
 			r.icon:Show(); r.icon:SetItem(e.item)
 			r.lvl:SetText(e.later and ("L" .. e.item.reqLevel) or "")
 			r.name:SetText(e.item.name)
-			SetGainText(r.gain, e.gain, e.later)
+			SetGainText(r.gain, e)
 			r.price:SetWidth(40)
 			r.price:SetText(GL.MoneyShort(e.price))
 			T.Color(r.price, C.dim)
@@ -554,6 +567,23 @@ local function FillList()
 			T.Color(r.gain, C.sec)
 			r.price:SetText("")
 			r:Disable()
+		end
+	end
+	local total = Results() and Scanner.total
+	f.foot:SetShown(total ~= nil)
+	if total then
+		if total.n > 0 then
+			f.foot.label:SetText(total.n == 1 and "1 upgrade" or ("All %d upgrades"):format(total.n))
+			T.Color(f.foot.label, C.dim)
+			f.foot.gain:SetText(GL.Pct(total.gain))
+			T.Color(f.foot.gain, T.GainColor(total.gain))
+			f.foot.price:SetText(GL.MoneyShort(total.price))
+		else
+			local limit = GL.db.maxPrice
+			f.foot.label:SetText(limit >= 1e12 and "No upgrades found" or ("No upgrades under " .. GL.MoneyShort(limit, true)))
+			T.Color(f.foot.label, C.sec)
+			f.foot.gain:SetText("")
+			f.foot.price:SetText("")
 		end
 	end
 end
@@ -665,7 +695,7 @@ local function FillDetail()
 				-- (under 0.05 % apart they count as equal and the cheaper one is first, so they keep one decimal)
 				if n and math.abs(n.gain - c.gain) >= 0.05 and GL.Pct(n.gain) == GL.Pct(c.gain) then two = true end
 			end
-			SetGainText(r.gain, c.gain, c.later, two and 2 or nil)
+			SetGainText(r.gain, c, two and 2 or nil)
 			r.price:SetText(GL.Money(c.price))
 			r.selected = idx == selectedIndex
 			r.hl:SetVertexColor(a[1], a[2], a[3], r.selected and 0.10 or 0)
@@ -689,22 +719,22 @@ local function FillDetail()
 	-- why
 	local w = f.why
 	local g = e.res.gain
-	SetGainText(w.big, g.total, e.later)
+	SetGainText(w.big, e)
 	local s = GL.Character:Viewed()
 	local cyc0, cyc = g.cycle0, g.cycle
-	-- the total also counts survival a little; the kills per hour on their own are in brackets
-	local metric
-	if cyc then
-		metric = "better for leveling"
-	elseif s and s.spec.role == "healer" and s.mode ~= "endgame" then
-		metric = "better for leveling" -- healing and the damage a healer does alone, see the rows below
+	-- how big that is for one item, over what it is for (whole character; item vs worn says so)
+	local size = GL.Compare.SizeLabel(g.total)
+	local metric = T.Hex(g.total >= 0.8 and C.text or C.sec) .. size .. "|r\n"
+	if GL.db.itemPct and first then
+		metric = metric .. "vs. worn item"
 	else
-		metric = (s and s.mode) == "endgame" and "stronger for raiding" or "stronger for leveling"
+		metric = metric .. ((s and s.mode) == "endgame" and "for raiding" or "for leveling")
 	end
 	-- gear that needs a higher level says so where you decide, so it isn't bought by mistake (for an alt too)
 	if e.later and s then
 		local who = s.isAlt and s.altName or "you"
-		metric = T.Hex(C.warn) .. ("Needs level %d (%s %s %d)"):format(e.item.reqLevel, who, s.isAlt and "is" or "are", s.level) .. "|r"
+		metric = T.Hex(C.sec) .. size .. "|r\n" .. T.Hex(C.warn)
+			.. ("Needs level %d (%s %s %d)"):format(e.item.reqLevel, who, s.isAlt and "is" or "are", s.level) .. "|r"
 	end
 	w.metric:SetText(metric)
 	local vs = first and ("Replaces " .. ReplacedText(e)) or ("Fills empty " .. (e.res.label or ""):lower() .. " slot")

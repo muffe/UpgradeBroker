@@ -252,10 +252,45 @@ local function Better(order)
 end
 Scanner.Better = Better
 
+-- Every upgrade the slot list shows, worn together: { n, gain, price }. The model rates them as one set, so
+-- the gain is not a sum. Gear that needs a higher level is left out; where two compete for the same hand
+-- (a two-hander and an off hand), the bigger gain stays.
+function Scanner:Total()
+	local res = self.results
+	if not res then return nil end
+	local entries = {}
+	for _, g in ipairs(Scanner.GROUPS) do
+		local e = res[g.key] and res[g.key][1]
+		if e and not e.later then entries[#entries + 1] = e end
+	end
+	if #entries == 0 then return { n = 0 } end
+	table.sort(entries, function(a, b) return a.gain > b.gain end)
+	local s = entries[1].res.snap
+	local add, remove, weapons, used, price, n = {}, {}, {}, {}, 0, 0
+	for _, e in ipairs(entries) do
+		local r = e.res
+		local with = r.with or { e.item }
+		local clash = false
+		for _, it in ipairs(r.replaced or {}) do if used[it] then clash = true end end
+		for _, it in ipairs(with) do if used[it] then clash = true end end
+		for k in pairs(r.weapons or {}) do if weapons[k] ~= nil then clash = true end end
+		if not clash then
+			for _, it in ipairs(r.replaced or {}) do used[it] = true; remove[#remove + 1] = it end
+			for _, it in ipairs(with) do used[it] = true; add[#add + 1] = it end
+			for k, v in pairs(r.weapons or {}) do weapons[k] = v end
+			price, n = price + e.price, n + 1
+		end
+	end
+	local Model = GL.Model
+	local x = Model.Apply(s, Model.Calibrate(s).x0, add, remove, next(weapons) and weapons or nil)
+	return { n = n, gain = Model.Gain(s, x).total, price = price }
+end
+
 function Scanner:Sort()
-	if not self.results then return end
+	if not self.results then self.total = nil return end
 	local cmp = Better(GL.db.order == "gain" and "gain" or "value")
 	for _, list in pairs(self.results) do table.sort(list, cmp) end
+	self.total = self:Total()
 	GL:Fire("GL_RESULTS")
 end
 

@@ -14,6 +14,7 @@ local DEFAULTS = {
 	bagMarkers = true,
 	questMarkers = true,
 	tooltip = true,
+	itemPct = false,         -- show item vs worn instead of the whole-character gain
 	scans = {},              -- [realm-faction] = { time = t, items = { [key] = "price|link" } }
 }
 local CHAR_DEFAULTS = {

@@ -5,7 +5,7 @@ GL.InfoText = {
 	sections = {
 		{
 			heading = "What the number means",
-			body = "Each item gets one percentage: how much stronger you get if you equip it instead of what you wear now.\n- Rings, trinkets, and one-handers check both slots and use the better gain.\n- Two-handers compare against your main hand and off hand together.",
+			body = "Each item gets one percentage: how much stronger you get if you equip it instead of what you wear now. One item usually changes your whole character by only 1 to 3%, so +1.2% is a good upgrade.\n- Size labels next to the percent: \"Big upgrade\" (2% or more), \"Good upgrade\" (0.8% or more), \"Minor upgrade\" (below 0.8%).\n- Rings, trinkets, and one-handers check both slots and use the better gain.\n- Two-handers compare against your main hand and off hand together.\n- In Options, \"Upgrade percentage\" switches between \"Whole character\" (default) and \"Item vs. worn\": how much better the new item is than the one you wear, like other upgrade addons. \"New\" shows if the slot is empty or the worn item adds nothing. Sorting, labels, the total, and the breakdown bars stay whole-character.",
 		},
 		{
 			heading = "Leveling and raiding",
@@ -21,7 +21,7 @@ GL.InfoText = {
 		},
 		{
 			heading = "Reading the breakdown",
-			body = "While leveling, three rows show Kills/hour, Survival, and \"Per kill\" seconds saved fighting and resting.\n- Each changed stat lists its share (like \"+14 Shadow Damage +2.9%\"), adding up to the total. Smaller stats group into \"Other stats\".\n- Weapon or shield changes get their own line.\n- Amber items marked \"Level 37\" need a higher level. Check before you buy, especially for an alt.",
+			body = "While leveling, three rows show Kills/hour, Survival, and \"Per kill\" seconds saved fighting and resting.\n- Each changed stat lists its share (like \"+14 Shadow Damage +2.9%\"), adding up to the total. Smaller stats group into \"Other stats\".\n- Weapon or shield changes get their own line.\n- Amber items marked \"Level 37\" need a higher level. Check before you buy, especially for an alt.\n- The footer under the slot list (like \"All 9 upgrades  +11%  8g 40s\") shows all listed upgrades worn at once (computed together, not added up) with the total price. Gear that needs a higher level is left out.",
 		},
 		{
 			heading = "What is not counted",

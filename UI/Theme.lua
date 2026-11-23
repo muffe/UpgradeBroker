@@ -384,7 +384,7 @@ end
 
 function T.GainColor(p, later)
 	if later then return T.C.warn end
-	if p >= 1 then return T.C.up end
+	if p >= 0.8 then return T.C.up end -- a "Good upgrade" and up (Compare.SizeLabel)
 	if p > 0 then return T.C.upSoft end
 	if p < 0 then return T.C.down end
 	return T.C.sec

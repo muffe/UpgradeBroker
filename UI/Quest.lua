@@ -87,7 +87,7 @@ local function UpdateFrame(rf, fromLog)
 	for _, r in ipairs(rated) do
 		local m = Mark(r.b)
 		local later = r.res.reason == "later"
-		m.text:SetText(GL.Pct(r.res.gain.total))
+		m.text:SetText(GL.Compare.PctText(r.res))
 		T.Color(m.text, later and C.warn or C.up)
 		m.text:Show(); m.bg:Show(); m.coin:Hide()
 		m.frameAlpha = r.b == best and 1 or 0

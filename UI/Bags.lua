@@ -10,8 +10,6 @@ GL.Bags = Bags
 
 local badges = {} -- [button] = { bg, text }
 
--- the same rounding as everywhere else (+0.6%, +4.8%, +12%)
-local function BadgeText(g) return GL.Pct(g) end
 
 local function Badge(button, parent)
 	local b = badges[button]
@@ -42,7 +40,7 @@ local function Paint(button, link, parent)
 	end
 	local b = Badge(button, parent)
 	local later = res.reason == "later"
-	b.text:SetText(BadgeText(res.gain.total))
+	b.text:SetText(GL.Compare.PctText(res))
 	T.Color(b.text, later and C.warn or C.up)
 	b.holder:Show()
 end

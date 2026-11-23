@@ -173,11 +173,41 @@ check("plate helm left out", not (res.HEAD and res.HEAD[1] and res.HEAD[1].item.
 check("shadow cowl over the price limit left out", not res.HEAD)
 check("ring compared against the empty ring slot or the band", res.RING and res.RING[1] ~= nil)
 check("future robe sorted after wearable ones", res.CHEST and not res.CHEST[1].later)
+do
+	-- the footer: every upgrade the list shows, worn together
+	local t, n, price, best = GL.Scanner.total, 0, 0, 0
+	for _, g in ipairs(GL.Scanner.GROUPS) do
+		local e = res[g.key] and res[g.key][1]
+		if e and not e.later then n, price, best = n + 1, price + e.price, math.max(best, e.gain) end
+	end
+	print(("     total: %d upgrades %.2f%% %s"):format(t and t.n or -1, t and t.gain or 0, t and GL.Money(t.price or 0, true) or "-"))
+	check("total counts the wearable upgrades the list shows", t and t.n == n and t.price == price)
+	check("total is at least the best single upgrade", t and t.gain >= best - 1e-9)
+	check("size labels", GL.Compare.SizeLabel(2) == "Big upgrade" and GL.Compare.SizeLabel(1.2) == "Good upgrade"
+		and GL.Compare.SizeLabel(0.6) == "Minor upgrade")
+	local chest = res.CHEST and res.CHEST[1]
+	local ig = chest and GL.Compare.ItemGain(chest.res.snap, chest.gain, chest.res.replaced)
+	print(("     chest item vs worn: %s (character %.2f%%)"):format(tostring(ig), chest and chest.gain or 0))
+	check("item vs worn is bigger than the character gain", ig and ig > chest.gain)
+	check("item vs worn: nothing to compare with in an empty slot", GL.Compare.ItemGain(chest.res.snap, 1, {}) == nil)
+end
 if res.CHEST then for i, e in ipairs(res.CHEST) do print(("     chest %d: %s %.2f%% %s %.2f/g%s"):format(i, e.item.name, e.gain, GL.Money(e.price, true), e.perGold, e.later and " (later)" or "")) end end
 
 try("window in the auction house refreshes", function() GL.Window:Show(); GL.Window:Refresh() end)
 try("order: gain, slot, value", function()
 	for _, o in ipairs({ "gain", "slot", "value" }) do GL.db.order = o; GL.Scanner:Sort(); GL.Window:Refresh() end
+end)
+try("item vs worn everywhere", function()
+	GL.db.itemPct = true
+	GL.Window:Refresh()
+	local txt = UpgradeBrokerFrame.why.big:GetText()
+	print("     decision in item mode: " .. tostring(txt) .. " / " .. tostring(UpgradeBrokerFrame.why.metric:GetText()))
+	assert(txt == "New" or txt:find("%%"))
+	GL.db.itemPct = false
+	GL.Window:Refresh()
+	print("     footer: " .. tostring(UpgradeBrokerFrame.foot.label:GetText()) .. " " .. tostring(UpgradeBrokerFrame.foot.gain:GetText())
+		.. " " .. tostring(UpgradeBrokerFrame.foot.price:GetText()))
+	assert(UpgradeBrokerFrame.foot.label:GetText():find("upgrade"))
 end)
 try("mode switch re-rates", function() GL:SetMode("endgame"); GL:SetMode("level") end)
 try("price typed as text", function() UpgradeBrokerFrame.left:GetWidth() end)
