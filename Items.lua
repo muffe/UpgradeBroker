@@ -185,7 +185,7 @@ local KIND = {
 }
 
 local cache = {}       -- [link] = item
-local waiting = {}     -- [itemID] = true while the client loads it
+local waiting = {}     -- [itemID] = GetTime() of the request while the client loads it
 function Items.ClearCache() cache = {} end
 
 -- An item: { link, id, name, icon, quality, ilvl, reqLevel, equipLoc, slots, kind, classID, subclassID,
@@ -199,8 +199,10 @@ function Items.Get(link)
 	if not id or not EQUIP[equipLoc or ""] then cache[link] = false return nil end
 	local name, _, quality, ilvl, reqLevel, _, _, _, _, icon, sell, classID, subclassID = GetItemInfo(link)
 	if not name then
-		if not waiting[id] then
-			waiting[id] = true
+		-- asked again when no answer came (the game drops items it has loaded to make room for others)
+		local now = GetTime and GetTime() or 0
+		if not waiting[id] or now - waiting[id] > 5 then
+			waiting[id] = now
 			if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
 		end
 		return nil

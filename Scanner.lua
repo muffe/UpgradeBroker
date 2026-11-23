@@ -103,11 +103,13 @@ function Scanner:Start()
 	return true
 end
 
--- Reads the replicate list in small slices so the game never stalls. Rows whose item the client hasn't
--- loaded yet are read again (up to three times) once it has.
+-- Reads the replicate list in small slices so the game never stalls. Auctions whose item the game hasn't
+-- loaded yet have no link; they join the scan later (ReadLate), so the list shows right after the first pass.
 local ratingRun = 0
 local lastRead -- GetTime() when our last read finished
 local readRun = 0
+local late -- { run, rows }: auctions still without a link, looked at again while the auction house is open
+local ReadLate
 local function Read()
 	ratingRun = ratingRun + 1 -- a rating still running belongs to the old data
 	readRun = readRun + 1
@@ -115,18 +117,16 @@ local function Read()
 	local total = AH.GetNumReplicateItems() or 0
 	local player = UnitName("player")
 	local best = {}
-	local todo = {}
-	for i = 0, total - 1 do todo[#todo + 1] = i end
-	local pass, i, later = 1, 0, {}
+	local i, later = 0, {}
+	late = nil
 	SetState("reading", 0)
-	local finish
 	local function step()
 		-- the auction house closed meanwhile: the list is gone, keep the last complete scan
 		if run ~= readRun then return end
 		local stop = debugprofilestop() + BATCH_MS
-		while i < #todo and debugprofilestop() < stop do
+		while i < total and debugprofilestop() < stop do
+			local row = i
 			i = i + 1
-			local row = todo[i]
 			local _, _, count, quality, _, _, _, _, _, buyout, _, _, _, owner, _, _, itemID, hasAll = AH.GetReplicateItemInfo(row)
 			if buyout and buyout > 0 and (count or 1) == 1 and (quality or 0) >= 1 and owner ~= player and itemID then
 				local _, _, _, equipLoc = GL.Items.GetItemInfoInstant(itemID)
@@ -142,17 +142,11 @@ local function Read()
 				end
 			end
 		end
-		if i < #todo then
-			SetState("reading", (pass - 1) / 4 + i / #todo / 4 * (pass == 1 and 3 or 1))
+		if i < total then
+			SetState("reading", i / math.max(1, total))
 			C_Timer.After(0, step)
-		elseif #later > 0 and pass < 4 then
-			todo, later, i, pass = later, {}, 0, pass + 1
-			C_Timer.After(1.5, step)
-		else
-			finish()
+			return
 		end
-	end
-	finish = function()
 		local items = {}
 		for key, e in pairs(best) do items[key] = e.price .. "|" .. e.link end
 		GL.db.scans[RealmKey() or "unknown"] = { time = time(), items = items }
@@ -160,20 +154,78 @@ local function Read()
 		Scanner.lastCount = total
 		SetState("idle")
 		Scanner:Rate()
+		if #later > 0 then
+			late = { run = run, rows = later }
+			ReadLate()
+		end
+	end
+	step()
+end
+
+-- The auctions that had no link yet: those whose item the game has loaded since join the scan (cheapest per
+-- kind) and the rating. Runs when the game says it loaded more, and every few seconds while that finds some.
+local lateBusy, lateSoon, lateAgain = false, false, false
+ReadLate = function()
+	if lateBusy then lateAgain = true return end
+	if not late then return end
+	if late.run ~= readRun or not Scanner.ahOpen then late = nil return end
+	lateBusy = true
+	local job, data = late, Scanner:Data()
+	local rows, still, found, i = job.rows, {}, {}, 0
+	local function step()
+		if late ~= job or job.run ~= readRun or not Scanner.ahOpen or not data then
+			lateBusy = false
+			if late == job then late = nil end
+			return
+		end
+		local stop = debugprofilestop() + BATCH_MS
+		while i < #rows and debugprofilestop() < stop do
+			i = i + 1
+			local row = rows[i]
+			local _, _, _, _, _, _, _, _, _, buyout, _, _, _, _, _, _, _, hasAll = AH.GetReplicateItemInfo(row)
+			local link = hasAll and AH.GetReplicateItemLink(row)
+			local key = link and KeyOf(link)
+			if not key then
+				still[#still + 1] = row
+			elseif buyout then
+				local old = data.items[key] and tonumber(data.items[key]:match("^(%d+)"))
+				if not old or buyout < old then
+					data.items[key] = buyout .. "|" .. link
+					found[#found + 1] = key
+				end
+			end
+		end
+		if i < #rows then C_Timer.After(0, step) return end
+		lateBusy = false
+		job.rows = still
+		if #found > 0 then Scanner:RateMore(found) end
+		if #still == 0 then late = nil return end
+		-- the game may load items without telling; keep looking while that finds some
+		if (#found > 0 or lateAgain) and not lateSoon then
+			lateAgain = false
+			lateSoon = true
+			C_Timer.After(3, function() lateSoon = false; ReadLate() end)
+		end
 	end
 	step()
 end
 
 -- The answer to our scan, or a full scan another addon (Auctionator) just made: that one is read as well,
--- once the list has stopped changing. Our own reading makes the client fire this event too; those are ignored.
+-- once the list has stopped changing. While the game loads items after our read it fires this too: then the
+-- auctions still without a link are looked at again (a new full scan can't come within 15 minutes of ours).
 local SETTLE = 3
 local settleToken = 0
+local lateEvent = false
 GL:On("REPLICATE_ITEM_LIST_UPDATE", function()
 	if Scanner.state == "waiting" then Read() return end
 	if not Scanner.ahOpen or Scanner.state == "reading" then return end
-	-- the client keeps firing this while it loads items, also after our own read; a new full scan can't come
-	-- sooner than 15 minutes, so a minute of quiet after our last read is safe
-	if lastRead and GetTime() - lastRead < 60 then return end
+	if lastRead and GetTime() - lastRead < COOLDOWN then
+		if late and not lateEvent then
+			lateEvent = true
+			C_Timer.After(1, function() lateEvent = false; ReadLate() end)
+		end
+		return
+	end
 	settleToken = settleToken + 1
 	local token = settleToken
 	C_Timer.After(SETTLE, function()
@@ -331,8 +383,8 @@ function Scanner:Rate()
 	local keys = {}
 	for key in pairs(data.items) do keys[#keys + 1] = key end
 	local total = #keys
-	-- todo: the items of this pass; later: those the game was still loading, for the next pass
-	local all, todo, later, i, lastMissing = {}, keys, {}, 0, math.huge
+	-- queue: items to rate now; waitingFor: those the game is still loading, by item ID
+	local all, queue, qi, waitingFor, nWaiting = {}, keys, 0, {}, 0
 	local maxPrice = GL.db.maxPrice
 	local stats = { priced = 0, missing = 0, unusable = {}, small = 0, upgrades = 0, near = {} }
 	-- false while the game is still loading the item
@@ -373,39 +425,100 @@ function Scanner:Rate()
 		end
 		return true
 	end
-	-- one bar across all passes: the share of items rated so far
-	local function Progress() return (total - (#todo - i) - #later) / math.max(1, total) end
-	SetState("rating", 0)
-	local function step()
+	-- one bar for the whole run: the share of items rated so far
+	local function Progress() return (total - nWaiting - (#queue - qi)) / math.max(1, total) end
+	-- the game says it has loaded an item (or nothing came for a while): rate what waited for it, right away,
+	-- before it drops the item again to make room for others
+	local stepping, lastArrival, watch, lastSweep = false, GetTime(), 0, math.huge
+	local step
+	local function Kick()
+		if stepping then return end
+		stepping = true
+		C_Timer.After(0, step)
+	end
+	local function Watch()
+		watch = watch + 1
+		local token, since = watch, lastArrival
+		C_Timer.After(3, function()
+			if run ~= ratingRun or token ~= watch or nWaiting == 0 or stepping then return end
+			if lastArrival ~= since then return Watch() end
+			-- quiet for a while: look over the rest once (some load without a word); stop when that finds nothing
+			if nWaiting >= lastSweep then SetState("idle") return end
+			lastSweep = nWaiting
+			for _, list in pairs(waitingFor) do for _, k in ipairs(list) do queue[#queue + 1] = k end end
+			waitingFor, nWaiting = {}, 0
+			Kick()
+		end)
+	end
+	step = function()
 		if run ~= ratingRun then return end
 		local stop = debugprofilestop() + BATCH_MS
-		while i < #todo and debugprofilestop() < stop do
-			i = i + 1
-			if not RateOne(todo[i]) then later[#later + 1] = todo[i] end
+		while qi < #queue and debugprofilestop() < stop do
+			qi = qi + 1
+			local key = queue[qi]
+			if not RateOne(key) then
+				local id = tonumber(key:match("^(%d+)")) or 0
+				waitingFor[id] = waitingFor[id] or {}
+				table.insert(waitingFor[id], key)
+				nWaiting = nWaiting + 1
+			end
 		end
-		if i < #todo then
+		if qi < #queue then
 			SetState("rating", Progress())
 			C_Timer.After(0, step)
 			return
 		end
+		stepping = false
+		queue, qi = {}, 0
 		-- what is rated so far shows right away
 		self.all = all
-		stats.missing = #later
+		stats.missing = nWaiting
 		self.lastStats = stats
 		self:Split()
-		-- items the client was still loading (a full scan can hold thousands it has never seen): only those are
-		-- rated again, as long as the game keeps delivering them
-		if #later > 0 and #later < lastMissing then
-			lastMissing = #later
-			todo, later, i = later, {}, 0
-			SetState("rating", Progress())
-			C_Timer.After(3, step)
-			return
-		end
-		SetState("idle")
+		if nWaiting == 0 then SetState("idle") return end
+		SetState("rating", Progress())
+		Watch()
 	end
+	self.current = {
+		run = run,
+		Arrived = function(id)
+			local list = waitingFor[id]
+			if not list then return end
+			waitingFor[id] = nil
+			nWaiting = nWaiting - #list
+			lastArrival = GetTime()
+			for _, k in ipairs(list) do queue[#queue + 1] = k end
+			Kick()
+		end,
+		-- new auctions (or cheaper ones of a kind already there) join this run
+		Add = function(more)
+			local gone = {}
+			for _, k in ipairs(more) do gone[k] = true end
+			for _, list in pairs(all) do
+				for n = #list, 1, -1 do if gone[list[n].key] then table.remove(list, n) end end
+			end
+			for _, k in ipairs(more) do queue[#queue + 1] = k end
+			total = total + #more
+			Kick()
+		end,
+	}
+	SetState("rating", 0)
+	stepping = true
 	step()
 end
+
+-- Auctions that joined the scan after its rating: rated into the same list when it is open, else on opening.
+function Scanner:RateMore(keys)
+	local f = _G.UpgradeBrokerFrame
+	if self.current and self.current.run == ratingRun and not self.stale and f and f:IsVisible() then
+		self.current.Add(keys)
+	else
+		self:Rate()
+	end
+end
+GL:On("GL_ITEM_LOADED", function(id)
+	if Scanner.current and Scanner.current.run == ratingRun then Scanner.current.Arrived(id) end
+end)
 
 -- Splits the rated upgrades by your max price: within it they make the list; above it they only fill slots
 -- with nothing within it, cheapest first. A new limit needs no new rating.
