@@ -266,6 +266,10 @@ SlashCmdList.UPGRADEBROKER = function(msg)
 		GL.Options:Toggle(msg:match("^set%s+(%S+)"))
 	elseif msg == "debug" then
 		GL.Character:Dump()
+	elseif msg == "record" then
+		GL.Record:Start()
+	elseif msg == "record clear" then
+		GL.Record:Clear()
 	else
 		GL.Window:Toggle()
 	end

@@ -7,7 +7,7 @@
 ## X-Curse-Project-ID: 1824631
 ## IconTexture: Interface\Icons\INV_Misc_Spyglass_03
 ## OptionalDeps: EllesmereUI, EllesmereUIBags, EllesmereUIBlizzardSkin
-## SavedVariables: UpgradeBrokerDB
+## SavedVariables: UpgradeBrokerDB, UpgradeBrokerRecord
 ## SavedVariablesPerCharacter: UpgradeBrokerCharDB
 ## AddonCompartmentFunc: UpgradeBroker_OnCompartmentClick
 
@@ -28,3 +28,4 @@ UI\Tooltip.lua
 UI\Bags.lua
 UI\Quest.lua
 Options.lua
+Record.lua

@@ -51,20 +51,25 @@ GetManaRegen = function() return T.player.regen or 0, T.player.regenIC or 0 end
 CanDualWield = function() return T.player.dw or false end
 GetInventoryItemLink = function(_, slot) return T.equipped[slot] end
 
+-- T.source: recorded game data (tests/replay.lua) that answers the item functions instead of T.items
+T.source = nil
 C_Item = {}
 C_Item.GetItemInfoInstant = function(link)
+	if T.source then return T.source.GetItemInfoInstant(link) end
 	local d = T.items[link]
 	if not d then return nil end
-	return 1, nil, nil, d.equipLoc, nil, d.classID, d.subclassID
+	return tonumber(link:match("item:(%d+)")) or 1, nil, nil, d.equipLoc, nil, d.classID, d.subclassID
 end
 T.slow = {} -- links the "client" hasn't loaded yet
 C_Item.GetItemInfo = function(link)
 	if T.slow[link] then return nil end
+	if T.source then return T.source.GetItemInfo(link) end
 	local d = T.items[link]
 	if not d then return nil end
 	return d.name, link, d.quality or 2, d.ilvl or 30, d.reqLevel or 1, nil, nil, 1, d.equipLoc, 0, 100, d.classID, d.subclassID
 end
 C_Item.GetItemStats = function(link)
+	if T.source then return T.source.GetItemStats(link) end
 	local d = T.items[link]
 	local t = {}
 	for k, v in pairs(d and d.stats or {}) do t[k] = v end
@@ -72,6 +77,7 @@ C_Item.GetItemStats = function(link)
 end
 C_TooltipInfo = {
 	GetHyperlink = function(link)
+		if T.source then return T.source.GetHyperlink(link) end
 		local d = T.items[link]
 		local lines = { { leftText = d and d.name or "?" } }
 		for _, l in ipairs(d and d.lines or {}) do

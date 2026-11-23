@@ -46,7 +46,23 @@ Run the unit and UI tests with Lua 5.1:
 ```sh
 lua5.1 tests/run.lua
 lua5.1 tests/ui.lua
+lua5.1 tests/replay.lua
 ```
+
+`tests/replay.lua` plays back a recording from the game instead of made-up items. It checks that the ratings match the game's, that every saved character gets plausible upgrades, and that rating a full scan stays within frame and memory budgets. To record:
+
+1. In the game, scan the Auction House and keep it open, then type `/ub record` and wait for "Recorded".
+2. `/reload`, then import the recording:
+
+   ```sh
+   lua5.1 tools/import-record.lua "<WoW>/_forever_/WTF/Account/<account>/SavedVariables/UpgradeBroker.lua"
+   ```
+
+3. `/ub record clear` in the game frees the memory again.
+
+The importer replaces character names with `Char1`, `Char2`, and so on. It writes `tests/fixtures/forever.lua` and a packed `forever.lua.gz`; only the `.gz` goes into the repository.
+
+Without the Auction House open (scan cooldown, or after a `/reload`) the recording has no auction rows. Pass an earlier fixture of the same scan as a third argument to take them from there.
 
 ### Data
 
