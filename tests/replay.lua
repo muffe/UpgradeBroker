@@ -283,6 +283,35 @@ try("every scanned item reads without an error", function()
 	assert(none == 0, none .. " recorded items read as nothing")
 end)
 
+-- "Special effects are not counted" only for items that have one: every other Equip line is read as a stat.
+-- A new kind of line on the auction house shows up here first.
+local EFFECTS = { "^use:", "^chance on hit", "chance", "pierce", " against ", "^equip: increased [%a%- ]+ %+%d+%.?$",
+	"stealth", "swim", "movement speed", "breath", "fashion", "dying", "taken increased", "weapon damage",
+	"damage to your weapon", "damage done to %a+ by" }
+try("every Equip line is read as a stat, or is an effect", function()
+	local unknown, seen = {}, {}
+	for _, k in ipairs(keys) do
+		local link = LinkOf(k)
+		local item = GL.Items.Get(link)
+		if item and item.effect then
+			local real = false
+			local lines = {}
+			for _, l in ipairs(Item(link).lines or {}) do
+				local t = (l.leftText or ""):lower()
+				if t:find("^equip:") or t:find("^use:") or t:find("^chance on hit") then
+					lines[#lines + 1] = t
+					for _, pat in ipairs(EFFECTS) do if t:find(pat) then real = true end end
+				end
+			end
+			if not real then
+				local text = table.concat(lines, " / "):gsub("%d+", "N")
+				if not seen[text] then seen[text] = true; unknown[#unknown + 1] = text end
+			end
+		end
+	end
+	assert(#unknown == 0, #unknown .. " kinds of lines not read:\n     " .. table.concat(unknown, "\n     ", 1, math.min(8, #unknown)))
+end)
+
 ---------------------------------------------------------------------------
 -- Reading the auction house
 ---------------------------------------------------------------------------

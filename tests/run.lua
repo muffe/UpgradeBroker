@@ -99,6 +99,12 @@ local w1, w3 = rate(hit1), rate(hit3)
 check("warrior: 1% hit below the cap is worth something", w1.gain.total > 0.3, pct(w1))
 check("warrior: 3% hit is worth less than 3x 1% (cap at 8%)", w3.gain.total < 3 * w1.gain.total, pct(w3))
 check("warrior: tooltip percent replaces the rating (3%, not 3% + 3%)", GL.Items.Get(hit3).stats.HIT == 3)
+local undead = GL.Items.Get(T.Item("item:9001", { name = "Blessed Band", equipLoc = "INVTYPE_FINGER", classID = 4, subclassID = 0,
+	stats = {}, lines = { "Equip: +15 Attack Power against Undead." } }))
+check("attack power against Undead is an effect, not attack power", undead.stats.AP == nil and undead.effect)
+local healer = GL.Items.Get(T.Item("item:9002", { name = "Healer's Robe", equipLoc = "INVTYPE_ROBE", classID = 4, subclassID = 1,
+	stats = {}, lines = { "Equip: Increases healing done by up to 11 and damage done by up to 4 for all magical spells and effects." } }))
+check("healer wording: 11 healing and 4 spell damage, no effect", healer.stats.HEAL == 11 and healer.stats.SP == 4 and not healer.effect)
 
 ---------------------------------------------------------------------------
 -- Every spec at levels 12, 35 and 60 in both modes: a finite rating, stamina never hurts, the main stat helps

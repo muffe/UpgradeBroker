@@ -64,6 +64,8 @@ local PCT_RULES = {
 }
 local FLAT_RULES = {
 	{ "damage and healing done by magical spells and effects by up to (%d+)", "SP", "HEAL" },
+	{ "healing done by magical spells and effects by up to (%d+)", "HEAL" },
+	{ "damage done by magical spells and effects by up to (%d+)", "SP" },
 	{ "healing done by spells and effects by up to (%d+)", "HEAL" },
 	{ "healing spells and effects by up to (%d+)", "HEAL" },
 	{ "block value of your shield by (%d+)", "BLOCKVAL" },
@@ -114,8 +116,17 @@ local function ReadTooltip(link, out, meta)
 			elseif classesPrefix and t:sub(1, #classesPrefix) == classesPrefix then
 				meta.classes = t:sub(#classesPrefix + 1)
 			elseif t:find("^equip:") and not t:find("when fighting") and not t:find("for %d+ sec") then
-				local matched = false
-				for _, r in ipairs(PCT_RULES) do
+				-- "+10 Attack Power against Undead" counts only there: an effect, not attack power
+				local matched = t:find(" against ") ~= nil
+				if matched then meta.effect = true end
+				-- healer gear: "Increases healing done by up to 11 and damage done by up to 4 for all magical spells"
+				local heal, dmg = t:match("healing done by up to (%d+) and damage done by up to (%d+)")
+				if heal then
+					flat.HEAL = (flat.HEAL or 0) + tonumber(heal)
+					flat.SP = (flat.SP or 0) + tonumber(dmg)
+					matched = true
+				end
+				for _, r in ipairs(matched and {} or PCT_RULES) do
 					local v = tonumber(t:match(r[1]))
 					if v then pct[r[2]] = (pct[r[2]] or 0) + v; matched = true break end
 				end
