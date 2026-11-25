@@ -6,11 +6,12 @@
 --   white   melee auto attacks (both hands)      yellow  melee special attacks (normalized weapon damage)
 --   ranged  auto shot                            shots   ranged special attacks
 --   spell   spell damage (schools below)          heal    healing spells
---   wand    wand shots between spells             pet     a pet or demon (does not grow with your gear)
+--   wand    wand shots between spells             pet     a pet or demon (Model.PetDPS: what it takes from you)
 -- Hunters keep a little melee while leveling (before the first bow and when mobs reach them).
 -- Shares per mode: "level" (fighting mobs of your level alone) and "endgame" (a raid boss 3 levels above).
 -- critMult: spell crit damage (1.5 base; talents like Ruin, Ice Shards, Elemental Fury make it 2).
--- critY: special attack crit damage (2.0 base; Impale and Lethality add 0.2 to 0.3).
+-- critY: special attack crit damage (2.0 base; Impale and Lethality add 0.2, Mortal Shots 0.3); critR: auto shot
+-- crit damage (Mortal Shots). meleeSpells: the spell part rolls the melee table and crits double (paladin seals).
 -- filler / heal: the spell whose rank at your level (Data/Leveling.lua, WoW Forever game data) sets the base
 -- damage or healing and the spell power coefficient of the spell part.
 -- Levelling time model (Model.LevelCycle): manaUse = mana spent while fighting as a share of casting manaSpell
@@ -38,6 +39,11 @@ S.ROLE_WEIGHTS = {
 
 local function spec(t) return t end
 
+-- Melee hybrids have no filler spell: their spell part follows a level curve (Model.SpellBase / SpellCoef).
+-- hybridSP scales the curve's spell damage coefficient so a point of spell damage weighs against a point of
+-- attack power as in wowsims/forever's level 60 stat weights (Retribution about 2, Enhancement about 1.3).
+local HYBRID_SP = { PALADIN = 1.8, SHAMAN = 1.9 }
+
 S.list = {
 	WARRIOR = {
 		spec { key = "ARMS", name = "Arms", role = "dps", critY = 2.2,
@@ -51,25 +57,27 @@ S.list = {
 		spec { key = "HOLY", name = "Holy", role = "healer", critMult = 1.5, heal = "Holy Light",
 			comps = { level = { heal = 1 }, endgame = { heal = 1 } } },
 		spec { key = "PROT", name = "Protection", role = "tank", critY = 2.0, critMult = 1.5, shield = true, manaUse = 0.35, manaSpell = "Holy Light",
+			meleeSpells = true, hybridSP = HYBRID_SP.PALADIN,
 			schools = { HOLY = 1 },
 			comps = { level = { white = 0.45, yellow = 0.15, spell = 0.4 }, endgame = { white = 0.35, yellow = 0.15, spell = 0.5 } } },
 		spec { key = "RET", name = "Retribution", role = "dps", critY = 2.0, critMult = 1.5, schools = { HOLY = 1 }, manaUse = 0.3, manaSpell = "Holy Light",
+			meleeSpells = true, hybridSP = HYBRID_SP.PALADIN,
 			comps = { level = { white = 0.5, yellow = 0.2, spell = 0.3 }, endgame = { white = 0.45, yellow = 0.2, spell = 0.35 } } },
 	},
 	HUNTER = {
 		spec { key = "BM", name = "Beast Mastery", role = "dps", petTank = 0.35, manaUse = 0.45, manaSpell = "Lightning Bolt", critY = 2.0, ranged = true,
 			comps = { level = { ranged = 0.3, shots = 0.17, white = 0.08, pet = 0.45 }, endgame = { ranged = 0.45, shots = 0.25, pet = 0.3 } } },
-		spec { key = "MM", name = "Marksmanship", role = "dps", petTank = 0.35, manaUse = 0.45, manaSpell = "Lightning Bolt", critY = 2.3, ranged = true,
+		spec { key = "MM", name = "Marksmanship", role = "dps", petTank = 0.35, manaUse = 0.45, manaSpell = "Lightning Bolt", critY = 2.3, critR = 2.3, ranged = true,
 			comps = { level = { ranged = 0.36, shots = 0.26, white = 0.08, pet = 0.3 }, endgame = { ranged = 0.45, shots = 0.4, pet = 0.15 } } },
 		spec { key = "SV", name = "Survival", role = "dps", petTank = 0.35, manaUse = 0.45, manaSpell = "Lightning Bolt", critY = 2.0, ranged = true,
 			comps = { level = { ranged = 0.35, shots = 0.25, white = 0.1, pet = 0.3 }, endgame = { ranged = 0.45, shots = 0.3, white = 0.1, pet = 0.15 } } },
 	},
 	ROGUE = {
-		spec { key = "ASSA", name = "Assassination", role = "dps", critY = 2.3,
+		spec { key = "ASSA", name = "Assassination", role = "dps", critY = 2.2,
 			comps = { level = { white = 0.45, yellow = 0.55 }, endgame = { white = 0.45, yellow = 0.55 } } },
 		spec { key = "COMBAT", name = "Combat", role = "dps", critY = 2.0,
 			comps = { level = { white = 0.55, yellow = 0.45 }, endgame = { white = 0.6, yellow = 0.4 } } },
-		spec { key = "SUB", name = "Subtlety", role = "dps", critY = 2.3,
+		spec { key = "SUB", name = "Subtlety", role = "dps", critY = 2.2,
 			comps = { level = { white = 0.45, yellow = 0.55 }, endgame = { white = 0.5, yellow = 0.5 } } },
 	},
 	PRIEST = {
@@ -86,12 +94,13 @@ S.list = {
 		spec { key = "ELE", name = "Elemental", role = "dps", critMult = 2.0, filler = "Lightning Bolt", schools = { NATURE = 0.75, FIRE = 0.25 },
 			comps = { level = { spell = 0.85, white = 0.15 }, endgame = { spell = 1 } } },
 		spec { key = "ENH", name = "Enhancement", role = "dps", critY = 2.0, critMult = 1.5, manaUse = 0.3, manaSpell = "Lightning Bolt", schools = { NATURE = 0.6, FIRE = 0.4 },
+			hybridSP = HYBRID_SP.SHAMAN,
 			comps = { level = { white = 0.55, yellow = 0.2, spell = 0.25 }, endgame = { white = 0.55, yellow = 0.2, spell = 0.25 } } },
 		spec { key = "RESTO", name = "Restoration", role = "healer", critMult = 1.5, schools = { NATURE = 1 }, filler = "Lightning Bolt", heal = "Healing Wave",
 			comps = { level = { heal = 0.6, spell = 0.25, white = 0.15 }, endgame = { heal = 1 } } },
 	},
 	MAGE = {
-		spec { key = "ARCANE", name = "Arcane", role = "dps", critMult = 1.5, filler = "Frostbolt", schools = { ARCANE = 0.6, FROST = 0.25, FIRE = 0.15 },
+		spec { key = "ARCANE", name = "Arcane", role = "dps", critMult = 1.5, filler = "Arcane Wrath", schools = { ARCANE = 0.9, FIRE = 0.1 },
 			comps = { level = { spell = 0.9, wand = 0.1 }, endgame = { spell = 1 } } },
 		spec { key = "FIRE", name = "Fire", role = "dps", critMult = 2.1, filler = "Fireball", schools = { FIRE = 1 },
 			comps = { level = { spell = 0.9, wand = 0.1 }, endgame = { spell = 1 } } },
@@ -101,7 +110,7 @@ S.list = {
 	WARLOCK = {
 		spec { key = "AFFLI", name = "Affliction", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 1.2, schools = { SHADOW = 1 }, lifeTap = true,
 			comps = { level = { spell = 0.65, pet = 0.2, wand = 0.15 }, endgame = { spell = 0.85, pet = 0.15 } } },
-		spec { key = "DEMO", name = "Demonology", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 1.5, schools = { SHADOW = 0.85, FIRE = 0.15 }, lifeTap = true,
+		spec { key = "DEMO", name = "Demonology", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 1.5, schools = { SHADOW = 0.6, FIRE = 0.4 }, lifeTap = true,
 			comps = { level = { spell = 0.5, pet = 0.38, wand = 0.12 }, endgame = { spell = 0.75, pet = 0.25 } } },
 		spec { key = "DESTRO", name = "Destruction", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 2.0, schools = { SHADOW = 0.6, FIRE = 0.4 }, lifeTap = true,
 			comps = { level = { spell = 0.72, pet = 0.18, wand = 0.1 }, endgame = { spell = 0.9, pet = 0.1 } } },

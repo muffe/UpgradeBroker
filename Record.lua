@@ -68,6 +68,7 @@ local function Golden(link, s)
 	if not res.ok then return "no" .. FIELD .. tostring(res.reason) end
 	return Join({ "ok", ("%.6g"):format(res.gain and res.gain.total or 0), res.slot, res.reason }, 4)
 end
+Record.Golden = Golden
 
 local run = 0
 -- fn on every entry of list, a slice per frame, then done()

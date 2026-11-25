@@ -49,40 +49,8 @@ rec.player = rename[rec.player] or "Char0"
 rec.realmKey = "-" .. (rec.realmKey or ""):match("([^-]*)$")
 rec.charSettings = rec.charSettings or {}
 
--- write it as a Lua table, keys sorted so a new recording gives a readable diff
-local out = {}
-local function emit(s) out[#out + 1] = s end
-local function key(k)
-	if type(k) == "string" and k:match("^[%a_][%w_]*$") then return k end
-	return "[" .. (type(k) == "string" and ("%q"):format(k) or tostring(k)) .. "]"
-end
-local function write(v, indent)
-	if type(v) == "string" then return emit(("%q"):format(v)) end
-	if type(v) ~= "table" then return emit(tostring(v)) end
-	local keys = {}
-	for k in pairs(v) do keys[#keys + 1] = k end
-	table.sort(keys, function(a, b)
-		if type(a) == type(b) then return a < b end
-		return type(a) == "number"
-	end)
-	emit("{\n")
-	for _, k in ipairs(keys) do
-		emit(indent .. "\t" .. key(k) .. " = ")
-		write(v[k], indent .. "\t")
-		emit(",\n")
-	end
-	emit(indent .. "}")
-end
-emit("-- recorded with /ub record, imported by tools/import-record.lua\nreturn ")
-write(rec, "")
-emit("\n")
-local f = assert(io.open(to, "wb"))
-f:write(table.concat(out))
-f:close()
--- the repository keeps the packed one (tests/replay.lua reads either)
-os.execute(("gzip -9 -kf %q"):format(to))
+dofile("tools/fixture.lua").Write(rec, to)
 
 local n = 0
 for _ in pairs(rec.items or {}) do n = n + 1 end
-print(("%s: %d items, %d auction rows, %d characters, %.1f MB"):format(to, n, #(rec.rows or {}), #names,
-	#table.concat(out) / 1048576))
+print(("%s: %d items, %d auction rows, %d characters"):format(to, n, #(rec.rows or {}), #names))

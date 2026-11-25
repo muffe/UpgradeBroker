@@ -102,18 +102,86 @@ function Character.SpecKey(class)
 	return list[1] and list[1].key
 end
 
+-- Your talents by name: { ["Careful Aim"] = 3 }. WoW Forever keeps them as traits; older clients have
+-- GetTalentInfo. Empty when the client can't say (then no talent counts).
+local function TraitTalents(out)
+	local SI, TR = C_SpecializationInfo, C_Traits
+	if not (SI and TR and SI.GetCombatConfigIDForSpecGroup and TR.GetConfigInfo and TR.GetTreeNodes and TR.GetNodeInfo
+		and TR.GetEntryInfo and TR.GetDefinitionInfo) then return end
+	local spellName = (C_Spell and C_Spell.GetSpellName) or GetSpellInfo
+	pcall(function()
+		local configID = SI.GetCombatConfigIDForSpecGroup(SI.GetActiveSpecGroup and SI.GetActiveSpecGroup() or 1)
+		local info = configID and TR.GetConfigInfo(configID)
+		for _, treeID in ipairs(info and info.treeIDs or {}) do
+			for _, nodeID in ipairs(TR.GetTreeNodes(treeID) or {}) do
+				local node = TR.GetNodeInfo(configID, nodeID)
+				local rank = node and (node.activeRank or node.currentRank) or 0
+				local entryID = node and (node.activeEntry and node.activeEntry.entryID or (node.entryIDs and node.entryIDs[1]))
+				local entry = rank > 0 and entryID and TR.GetEntryInfo(configID, entryID)
+				local def = entry and entry.definitionID and TR.GetDefinitionInfo(entry.definitionID)
+				local name = def and ((def.spellID and spellName and spellName(def.spellID)) or def.overrideName)
+				if name then out[name] = math.max(out[name] or 0, rank) end
+			end
+		end
+	end)
+end
+function Character.Talents()
+	local out = {}
+	TraitTalents(out)
+	if next(out) == nil and GetNumTalentTabs and GetNumTalents and GetTalentInfo then
+		for tab = 1, Call(GetNumTalentTabs) or 0 do
+			for i = 1, Call(GetNumTalents, tab) or 0 do
+				local ok, name, _, _, _, rank = pcall(GetTalentInfo, tab, i)
+				if ok and name and type(rank) == "number" and rank > 0 then out[name] = rank end
+			end
+		end
+	end
+	return out
+end
+
+-- What a talent turns into another stat, per rank (WoW Forever talent rows, as wowsims/forever reads them):
+-- intSP is the share of Intellect added to spell damage per rank, spiHeal Spirit's to healing, and so on.
+local TALENT_CONV = {
+	["Champion of the Light"] = { intSP = { 0.12, 0.24, 0.36, 0.48, 0.60 } },                        -- 1311084
+	["Mental Dexterity"] = { intAP = { 0.33, 0.66, 1.00 } },                                         -- 415140
+	["Mental Quickness"] = { intSP = { 0.15, 0.30 }, intHeal = { 0.15, 0.30 } },                     -- 30812
+	["Careful Aim"] = { intAP = { 0.2, 0.4, 0.6, 0.8, 1.0 }, intRAP = { 0.2, 0.4, 0.6, 0.8, 1.0 } }, -- 1223984
+	["Spiritual Guidance"] = { spiSP = { 0.01, 0.03, 0.05, 0.06, 0.08 }, spiHeal = { 0.05, 0.10, 0.15, 0.20, 0.25 } }, -- 14901
+}
+
+-- The talent parts of conv: stat conversions, and the talents the model asks about by name.
+function Character.TalentConv(talents)
+	local c = {}
+	for name, t in pairs(TALENT_CONV) do
+		local rank = talents[name]
+		if rank and rank > 0 then
+			for key, per in pairs(t) do c[key] = (c[key] or 0) + per[math.min(rank, #per)] end
+		end
+	end
+	c.arcaneBlast = (talents["Arcane Blast"] or 0) > 0 or nil
+	c.brand = talents["Demonic Brand"]
+	c.hawk = (talents["Summon Hawk"] or 0) > 0 or nil
+	return c
+end
+
 local function SumItems(equipped, key)
 	local t = 0
 	for _, item in pairs(equipped) do t = t + (item.stats[key] or 0) end
 	return t
 end
 
-local function Weapon(item, formLevel)
-	if formLevel then return { dps = 0.9 * formLevel, speed = 1, form = true } end
+-- form: the cat or bear paw's swing speed. In form the paw hits with the weapon's damage per second at the
+-- form's speed (wowsims/forever druid/forms.go, EV-0041); with no weapon, a paw of 0.9 damage per second a level.
+local function Weapon(item, formSpeed, level)
+	if formSpeed then
+		local dps = item and item.stats.DPS or 0.9 * (level or 1)
+		return { dps = dps, speed = formSpeed, form = true }
+	end
 	if not item or not item.stats.DPS then return nil end
 	return { dps = item.stats.DPS, speed = item.stats.SPEED or 2.5, kind = item.kind, sub = item.subclassID }
 end
 Character.Weapon = Weapon
+Character.FORM_SPEED = { CAT = 1.0, BEAR = 2.5 }
 
 -- Builds the snapshot. Returns nil while gear is still loading (try again on GL_ITEM_LOADED).
 function Character:Build()
@@ -155,6 +223,12 @@ function Character:Build()
 	st.HASTE = math.max(0, SumItems(s.equipped, "HASTE"))
 	st.EXP = SumItems(s.equipped, "EXP")
 	st.DEF = SumItems(s.equipped, "DEF")
+	-- what only your gear gives: spell penetration, weapon skill, flat weapon damage
+	for _, item in pairs(s.equipped) do
+		for k, v in pairs(item.stats) do
+			if k == "SPEN" or k == "WDMG" or k:find("^WSKILL_") then st[k] = (st[k] or 0) + v end
+		end
+	end
 	local _, armor = Call(UnitArmor, "player")
 	st.ARMOR = armor or 0
 	st.HP = Call(UnitHealthMax, "player") or 0
@@ -184,11 +258,15 @@ function Character:Build()
 	-- share of the not-casting regeneration you keep while casting (talents like Meditation)
 	conv.icShare = (st.REGEN_OOC > 0) and math.min(1, st.REGEN_IC / st.REGEN_OOC) or 0
 	conv.apStr, conv.apAgi, conv.rapAgi = cdata.apStr, cdata.apAgi, cdata.rapAgi
+	-- talents that turn one stat into another, and the ones the model reads by name
+	s.talents = Character.Talents()
+	for k, v in pairs(Character.TalentConv(s.talents)) do conv[k] = v end
+	-- a demon's Demonic Brand hits with the school of its kind: Fire for the Imp, Shadow for the others
+	conv.petFamily = Call(UnitCreatureFamily, "pet")
 
 	-- cat and bear form come at their level; before that a feral druid fights with the weapon
 	s.inForm = spec.form and level >= (spec.formLevel or 1) or false
-	local formLevel = s.inForm and level or nil
-	s.mh = Weapon(s.equipped[16], formLevel)
+	s.mh = Weapon(s.equipped[16], s.inForm and Character.FORM_SPEED[spec.key] or nil, level)
 	s.oh = (not s.inForm) and s.equipped[17] and s.equipped[17].stats.DPS and Weapon(s.equipped[17]) or nil
 	s.ranged = Weapon(s.equipped[18])
 	-- the game knows; without an answer: rogues from level 10, warriors and hunters from 20
@@ -220,6 +298,10 @@ function Character:Dump()
 	GL:Print(("crit/agi %.4f crit/int %.4f regen/spi %.4f mh %s oh %s ranged %s"):format(s.conv.critAgi, s.conv.critInt,
 		s.conv.regenSpi, s.mh and ("%.1f"):format(s.mh.dps) or "-", s.oh and ("%.1f"):format(s.oh.dps) or "-",
 		s.ranged and ("%.1f"):format(s.ranged.dps) or "-"))
+	local talents = {}
+	for name, rank in pairs(s.talents or {}) do talents[#talents + 1] = ("%s %d"):format(name, rank) end
+	table.sort(talents)
+	GL:Print("talents: " .. (#talents > 0 and table.concat(talents, ", ") or "none read"))
 	local m = GL.Model.Evaluate(s, GL.Model.FromSnapshot(s))
 	GL:Print(("model: dmg %.1f surv %.0f sus %.0f"):format(m.dmg, m.surv, m.sus))
 end
@@ -333,8 +415,7 @@ function Character.FromSaved(d)
 	s.inForm = spec.form and d.level >= (spec.formLevel or 1) or false
 	-- weapons in the alt's bags pair with one-handers; wait for them like for the gear worn
 	for _, link in ipairs(s.bagWeaponLinks) do if not GL.Items.Get(link) then s.incomplete = true end end
-	local formLevel = s.inForm and d.level or nil
-	s.mh = Weapon(s.equipped[16], formLevel)
+	s.mh = Weapon(s.equipped[16], s.inForm and Character.FORM_SPEED[spec.key] or nil, d.level)
 	s.oh = (not s.inForm) and s.equipped[17] and s.equipped[17].stats.DPS and Weapon(s.equipped[17]) or nil
 	s.ranged = Weapon(s.equipped[18])
 	return s

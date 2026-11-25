@@ -12,7 +12,9 @@
 -- Combat rules from wowsims/forever (MIT License, Copyright (c) 2022 wowsims team), sim/core/target.go:
 -- miss 5% + 0.1% per point of weapon skill short (0.2% past 10), +19% for white swings while dual wielding;
 -- dodge 5% + 0.1% per point; parry from the front; glancing 10% + 2% per point; spell miss 4% + 1% per level,
--- 17% at +3; crit suppression 0.2% per point plus 1.8% at +3. Instant attacks use normalized weapon damage.
+-- 17% at +3; crit suppression 0.2% per point plus 1.8% at +3; weapon skill from items lowers miss and dodge and
+-- raises glancing damage. Special attacks hit for one swing plus attack power at the normalized weapon speed.
+-- Ranged attacks and wands roll the ranged table; spell penetration adds damage; pets take stats from you.
 local _, GL = ...
 
 local Model = {}
@@ -140,8 +142,13 @@ function Model.Apply(s, x0, add, remove, weapons)
 
 	local str, agi, sta, int, spi = d.STR or 0, d.AGI or 0, d.STA or 0, d.INT or 0, d.SPI or 0
 	add("STR", str); add("AGI", agi); add("STA", sta); add("INT", int); add("SPI", spi)
-	add("AP", c.apStr * str + c.apAgi * agi + (d.AP or 0) + (s.inForm and (d.FAP or 0) or 0))
-	add("RAP", c.rapAgi * agi + (d.AP or 0) + (d.RAP or 0))
+	-- talents and forms that turn one stat into another (Character.TalentConv); Cat Form gives 100% of
+	-- Agility as attack power (3025 effect 5)
+	local catAgi = (s.inForm and s.spec.key == "CAT") and 1 or 0
+	local spFromStats = (c.intSP or 0) * int + (c.spiSP or 0) * spi
+		+ (c.arcaneBlast and (Model.ARCANE_CHARGES[s.mode] or 2) * 0.12 * int or 0)
+	add("AP", c.apStr * str + c.apAgi * agi + catAgi * agi + (c.intAP or 0) * int + (d.AP or 0) + (s.inForm and (d.FAP or 0) or 0))
+	add("RAP", c.rapAgi * agi + (c.intRAP or 0) * int + (d.AP or 0) + (d.RAP or 0))
 	add("CRIT", c.critAgi * agi + (d.CRIT or 0))
 	add("RCRIT", c.critAgi * agi + (d.CRIT or 0))
 	add("SCRIT", c.critInt * int + (d.CRIT or 0) + (d.SCRIT or 0))
@@ -153,11 +160,15 @@ function Model.Apply(s, x0, add, remove, weapons)
 		add("REGEN_OOC", c.regenSpi * spi + (d.MP5 or 0) / 5)
 		add("REGEN_IC", c.regenSpi * c.icShare * spi + (d.MP5 or 0) / 5)
 	end
-	for _, school in ipairs(SCHOOLS) do add("SP_" .. school, (d.SP or 0) + (d["SP_" .. school] or 0)) end
-	add("HEAL", d.HEAL)
+	for _, school in ipairs(SCHOOLS) do add("SP_" .. school, (d.SP or 0) + (d["SP_" .. school] or 0) + spFromStats) end
+	add("HEAL", (d.HEAL or 0) + (c.intHeal or 0) * int + (c.spiHeal or 0) * spi)
 	add("HIT", d.HIT); add("SHIT", (d.HIT or 0) + (d.SHIT or 0))
 	add("HASTE", d.HASTE); add("MHASTE", d.MHASTE)
-	add("EXP", d.EXP); add("DEF", d.DEF); add("PARRY", d.PARRY); add("BLOCK", d.BLOCK); add("BLOCKVAL", d.BLOCKVAL)
+	-- 0.05 block value a point of Strength (wowsims/forever core/character.go)
+	add("EXP", d.EXP); add("DEF", d.DEF); add("PARRY", d.PARRY); add("BLOCK", d.BLOCK); add("BLOCKVAL", (d.BLOCKVAL or 0) + 0.05 * str)
+	for k, v in pairs(d) do
+		if k == "SPEN" or k == "WDMG" or k:find("^WSKILL_") then add(k, v) end
+	end
 
 	-- a shield in the off hand after the swap (a first shield counts its block, a two-hander drops it)
 	for _, item in ipairs(removeList) do if item.kind == "shield" then x.shield = false end end
@@ -172,25 +183,40 @@ function Model.Apply(s, x0, add, remove, weapons)
 		if weapons.mh ~= nil then x.mh = weapons.mh or nil end
 		if weapons.oh ~= nil then x.oh = weapons.oh or nil end
 		if weapons.ranged ~= nil then x.ranged = weapons.ranged or nil end
-		if s.inForm then x.mh, x.oh = s.mh, nil end
+		-- in cat or bear form the paw hits with the new weapon's damage per second at the form's speed
+		if s.inForm then
+			if weapons.mh ~= nil then
+				x.mh = GL.Character.Weapon(weapons.mh and { stats = { DPS = weapons.mh.dps } } or nil,
+					GL.Character.FORM_SPEED[s.spec.key], s.level)
+			end
+			x.oh = nil
+		end
 	end
 	return x
 end
 
+-- Arcane Charges (Arcane Blast talent): 12% of Intellect as spell damage per charge, up to 4. The charges
+-- fall off 18 s after the first, so they average fewer than 4 (estimate: 2 in short leveling fights, 3.5 on a boss).
+Model.ARCANE_CHARGES = { level = 2, endgame = 3.5 }
+
 ---------------------------------------------------------------------------
 -- Damage parts
 ---------------------------------------------------------------------------
-local function MeleeTables(x, ctx, critY, dualWield)
-	local sd = 5 * ctx.d
+-- The melee table of one hand. skill: weapon skill above the level-based maximum (items). It lowers miss and
+-- dodge and raises the glancing damage, but not parry, the glancing chance or crit suppression
+-- (wowsims/forever core/target.go newAttackTableHand).
+local function MeleeTables(x, ctx, critY, dualWield, skill)
+	local base = 5 * ctx.d
+	local sd = base - (skill or 0)
 	local miss = sd > 10 and (5 + 0.2 * sd) or (5 + 0.1 * sd)
 	local dodge = max(0, 5 + 0.1 * sd - (x.EXP or 0))
 	local parry = 0
-	if ctx.front then parry = max(0, (sd > 10 and (5 + 0.6 * sd) or (5 + 0.1 * sd)) - (x.EXP or 0)) end
-	local glance = min(100, 10 + 2 * sd)
+	if ctx.front then parry = max(0, (base > 10 and (5 + 0.6 * base) or (5 + 0.1 * base)) - (x.EXP or 0)) end
+	local glance = min(100, 10 + 2 * base)
 	local gMin = min(0.91, max(0.01, 1.3 - 0.05 * sd))
 	local gMax = min(0.99, max(0.2, 1.2 - 0.03 * sd))
 	local glanceMult = (gMin + gMax) / 2
-	local supp = (sd > 0 and 0.2 * sd or 0) + (ctx.d >= 3 and 1.8 or 0)
+	local supp = (base > 0 and 0.2 * base or 0) + (ctx.d >= 3 and 1.8 or 0)
 	local crit = max(0, (x.CRIT or 0) - supp)
 	local hit = x.HIT or 0
 	-- white swings: one roll over miss, dodge, parry, glancing, crit, hit
@@ -200,13 +226,73 @@ local function MeleeTables(x, ctx, critY, dualWield)
 	local W = ((left - critW) + glance * glanceMult + critW * 2) / 100
 	-- special attacks: hit or not, then crit
 	local missY = max(0, miss - hit)
-	local Y = max(0, 100 - missY - dodge - parry) / 100 * (1 + crit / 100 * ((critY or 2) - 1))
-	return W, Y, miss
+	local land = max(0, 100 - missY - dodge - parry) / 100
+	local Y = land * (1 + crit / 100 * ((critY or 2) - 1))
+	return { W = W, Y = Y, miss = miss, land = land, crit = crit, supp = supp }
 end
 
 local function SpellHit(x, ctx)
 	local miss = ctx.d >= 3 and 17 or max(0, 4 + ctx.d)
 	return 1 - max(0, miss - (x.SHIT or 0)) / 100
+end
+
+-- Special attacks hit for one swing of the weapon plus attack power at the weapon's normalized speed
+-- (wowsims/forever core/attack.go): daggers 1.7, other one-handers 2.4, two-handers 3.3, ranged 2.8; a paw
+-- its form's speed.
+function Model.NormSpeed(w)
+	if w.form then return w.speed end
+	local sub = w.sub
+	if sub == 2 or sub == 3 or sub == 16 or sub == 18 or sub == 19 or w.kind == "ranged" then return 2.8 end
+	if sub == 15 then return 1.7 end
+	if w.kind == "2h" or sub == 1 or sub == 5 or sub == 6 or sub == 8 or sub == 10 or sub == 20 then return 3.3 end
+	return 2.4
+end
+
+local function Skill(x, w) return (w and not w.form and w.sub and x["WSKILL_" .. w.sub]) or 0 end
+
+-- Spell penetration past the target's resistance (none on normal mobs) pays out as bonus damage on hits:
+-- P / (P + 8L + 19), nothing under 1% (wowsims/forever core/spell_resistances.go, EV-0142).
+function Model.PenBonus(pen, level)
+	if not pen or pen <= 0 then return 0 end
+	local b = pen / (pen + 8 * level + 19)
+	return b >= 0.01 and b or 0
+end
+
+-- A pet's or demon's damage per second, with what it takes from you (wowsims/forever):
+--   demons: 17% of your spell damage (the better of Shadow and Fire) as attack power (warlock/pets.go), and with
+--     Demonic Brand each branded hit adds (level - 26) x 1.5 + 15.5 + 0.078 x your spell damage of the brand's
+--     school (Fire for the Imp, Shadow for the others)
+--   hunter pets: 10% of your higher attack power, your higher crit, your hit and expertise (hunter/pets.go); with
+--     Summon Hawk about 3 hawks, each 80% of (ranged attack power + 14 x main-hand dps) at 60 per dps
+-- The pet's own damage is a share of a mob of your level's (ExpectedStat; estimates: 0.6 for a demon, 1.25 for
+-- a happy hunter pet). Only the ratio to what it inherits matters: Calibrate scales the part to its share.
+function Model.PetDPS(s, x, ctx)
+	local L = min(60, s.level)
+	local _, mobDPS = Model.Creature(L)
+	local c = s.conv or {}
+	if s.class == "WARLOCK" then
+		local spEff = max(x.SP_SHADOW or 0, x.SP_FIRE or 0)
+		local dps = 0.6 * mobDPS + 0.8 * 0.17 * spEff / 14
+		local brand = c.brand or 0
+		if brand > 0 and L >= 26 then
+			local school = c.petFamily == "Imp" and "SP_FIRE" or "SP_SHADOW"
+			-- a Searing Pain about every 12 s brands 2 hits a rank; a demon hits every 2 s (estimate)
+			local rate = min(0.5, brand * 2 / 12)
+			dps = dps + rate * ((L - 26) * 1.5 + 15.5 + 0.078 * (x[school] or 0))
+		end
+		return dps
+	end
+	if s.class == "HUNTER" then
+		local land = 1 - (max(0, (ctx.d >= 3 and 8 or 5) - (x.HIT or 0)) + max(0, 5 - (x.EXP or 0))) / 100
+		local crit = max(x.CRIT or 0, x.RCRIT or 0)
+		local dps = (1.25 * mobDPS + 0.1 * max(x.AP or 0, x.RAP or 0) / 14) * land * (1 + crit / 100)
+		if c.hawk and L >= 25 then
+			local mh = x.mh and x.mh.dps or 0.5
+			dps = dps + 3 * (0.153 * mobDPS + 0.8 * ((x.RAP or 0) + 14 * mh) / 60) * land * (1 + crit / 200)
+		end
+		return dps
+	end
+	return 1
 end
 
 -- Raw size of each damage part (any unit; Calibrate turns them into shares).
@@ -216,41 +302,51 @@ function Model.Parts(s, x, ctx)
 	local out = {}
 	local meleeHaste = 1 + ((x.HASTE or 0) + (x.MHASTE or 0)) / 100
 	local spellHaste = 1 + (x.HASTE or 0) / 100
+	local mh, wdmg = x.mh, x.WDMG or 0
+	local dw = x.oh ~= nil
+	local T = MeleeTables(x, ctx, spec.critY, dw, Skill(x, mh))
 
 	if comps.white or comps.yellow then
-		local mh = x.mh
-		local mhBase = (mh and mh.dps or 0) + (x.AP or 0) / 14
-		local dw = x.oh ~= nil
-		local W, Y = MeleeTables(x, ctx, spec.critY, dw)
-		local white = mhBase * W * meleeHaste
-		if dw then white = white + (x.oh.dps + (x.AP or 0) / 14) * 0.5 * W * meleeHaste end
+		local mhDPS = mh and (mh.dps + wdmg / mh.speed) or 0
+		local white = (mhDPS + (x.AP or 0) / 14) * T.W * meleeHaste
+		if dw then
+			local To = MeleeTables(x, ctx, spec.critY, true, Skill(x, x.oh))
+			white = white + (x.oh.dps + wdmg / x.oh.speed + (x.AP or 0) / 14) * 0.5 * To.W * meleeHaste
+		end
 		out.white = white
-		out.yellow = mhBase * Y
+		-- one special attack: a swing of the weapon plus attack power at its normalized speed (cooldowns
+		-- set how often, so a slower weapon with the same dps hits harder)
+		out.yellow = (mh and (mhDPS * mh.speed + (x.AP or 0) * Model.NormSpeed(mh) / 14) or (x.AP or 0) * 2.4 / 14) * T.Y
 	end
 	if comps.ranged or comps.shots or comps.wand then
 		local r = x.ranged
-		local _, _, miss = MeleeTables(x, ctx, spec.critY, false)
-		local hitR = 1 - max(0, miss - (x.HIT or 0)) / 100
 		local isWand = r and r.sub == 19
+		local TR = MeleeTables(x, ctx, spec.critY, false, Skill(x, r))
+		-- ranged attacks and wands roll the ranged table: physical hit lowers their miss, spell hit does nothing
+		local hitR = 1 - max(0, TR.miss - (x.HIT or 0)) / 100
 		if comps.ranged or comps.shots then
 			-- no bow, gun or crossbow: no shots at all (the first one is rated against a typical one of your level)
 			local hasBow = r and not isWand
-			local base = hasBow and (r.dps + (x.RAP or 0) / 14) or 0
-			out.ranged = base * hitR * (1 + (x.RCRIT or 0) / 100) * meleeHaste
-			out.shots = base * hitR * (1 + (x.RCRIT or 0) / 100 * ((spec.critY or 2) - 1))
+			local rcrit = max(0, (x.RCRIT or 0) - TR.supp)
+			local dps = hasBow and r.dps or 0
+			out.ranged = (hasBow and (dps + (x.RAP or 0) / 14) or 0) * hitR * (1 + rcrit / 100 * ((spec.critR or 2) - 1)) * meleeHaste
+			out.shots = (hasBow and (dps * r.speed + (x.RAP or 0) * 2.8 / 14) or 0) * hitR * (1 + rcrit / 100 * ((spec.critY or 2) - 1))
 			out.rangedRef = (Model.RefRangedDPS(level) + (x.RAP or 0) / 14) * hitR
+			out.shotsRef = out.rangedRef * 2.8
 		end
 		if comps.wand then
-			out.wand = ((r and isWand) and r.dps or 0) * SpellHit(x, ctx) * (1 + (x.SCRIT or 0) / 100 * 0.5) * spellHaste
-			out.wandRef = Model.RefRangedDPS(level) * SpellHit(x, ctx)
+			out.wand = ((r and isWand) and r.dps or 0) * hitR * (1 + (x.SCRIT or 0) / 100 * 0.5) * spellHaste
+			out.wandRef = Model.RefRangedDPS(level) * hitR
 		end
 	end
 	if comps.spell then
 		-- per second of casting the spec's filler at its rank for your level (WoW Forever game data);
-		-- specs without one (paladin seals, shaman weapons) use a level curve
+		-- specs without one (paladin seals, shaman weapons and shocks) use a level curve, scaled per spec
+		-- (hybridSP) so spell damage weighs against attack power as in wowsims/forever's stat weights
 		local base, coef
 		local avg, _, cast, c = Model.SpellRank(Model.Filler(s), level)
-		if avg then base, coef = avg / cast, c / cast else base, coef = Model.SpellBase(level), Model.SpellCoef(level) end
+		if avg then base, coef = avg / cast, c / cast
+		else base, coef = Model.SpellBase(level), Model.SpellCoef(level) * (spec.hybridSP or 1) end
 		-- the schools: the spec's, or the fallback spell's own (a level 1 frost mage's Fireball is Fire)
 		local filler = Model.Filler(s)
 		local schools = (filler and filler ~= spec.filler and { [Model.SPELL_SCHOOL[filler] or "SHADOW"] = 1 })
@@ -259,7 +355,14 @@ function Model.Parts(s, x, ctx)
 		for school, share in pairs(schools) do
 			sum = sum + share * (base + (x["SP_" .. school] or 0) * coef)
 		end
-		out.spell = sum * SpellHit(x, ctx) * (1 + (x.SCRIT or 0) / 100 * ((spec.critMult or 1.5) - 1)) * spellHaste
+		sum = sum * (1 + Model.PenBonus(x.SPEN, level))
+		if spec.meleeSpells then
+			-- seals and Holy Strike roll the main hand's melee table, and their crits double (wowsims/forever
+			-- paladin/seal_of_righteousness.go, holy_strike.go; EV-0059, EV-0060)
+			out.spell = sum * T.land * (1 + T.crit / 100) * meleeHaste
+		else
+			out.spell = sum * SpellHit(x, ctx) * (1 + (x.SCRIT or 0) / 100 * ((spec.critMult or 1.5) - 1)) * spellHaste
+		end
 	end
 	if comps.heal then
 		local base, coef
@@ -273,13 +376,16 @@ function Model.Parts(s, x, ctx)
 		if avg then base, coef = avg / cast, c / cast else base, coef = 1.4 * Model.SpellBase(level), Model.SpellCoef(level) * 1.1 end
 		out.heal = (base + (x.HEAL or 0) * coef) * (1 + (x.SCRIT or 0) / 100 * ((spec.critMult or 1.5) - 1)) * spellHaste
 	end
-	if comps.pet then out.pet = 1 end
+	if comps.pet then out.pet = Model.PetDPS(s, x, ctx) end
 	return out
 end
 
+-- Armor: armor / (armor + 400 + 85 x attacker level), at every level (wowsims/forever core/spell_resistances.go).
+-- A boss three levels above crits 5.6% of its swings, 0.04% less a point of defense, and crushes 15% for 150%
+-- (wowsims/forever core/target.go).
 function Model.Survival(s, x, ctx)
 	local la = ctx.attacker
-	local k = la < 60 and (400 + 85 * la) or (400 + 85 * (la + 4.5 * (la - 59)))
+	local k = 400 + 85 * la
 	local armor = max(0, x.ARMOR or 0)
 	local dr = min(0.75, armor / (armor + k))
 	-- the game's dodge and parry already hold the defense you wear; count only the change
@@ -290,7 +396,9 @@ function Model.Survival(s, x, ctx)
 	if x.shield and (x.BLOCK or 0) > 0 then
 		blockRed = min(0.9, (x.BLOCK + def) / 100 * min(1, (x.BLOCKVAL or 0) / Model.HitSize(ctx)))
 	end
-	local taken = (1 - dr) * (1 - avoid) * (1 - blockRed)
+	local extra = 0
+	if la >= s.level + 3 then extra = max(0, 5.6 - 0.04 * (x.DEF or 0)) / 100 + 0.15 * 0.5 end
+	local taken = (1 - dr) * (1 - avoid) * (1 - blockRed) * (1 + extra)
 	return max(1, x.HP or 1) / max(0.01, taken)
 end
 
@@ -322,7 +430,7 @@ function Model.Calibrate(s)
 	for name, share in pairs(comps) do
 		local raw = parts[name] or 0
 		-- a part you have nothing for yet (no wand, no bow): scaled to a typical one of your level
-		if raw <= 0 then raw = parts[name .. "Ref"] or (name == "shots" and parts.rangedRef) or 1 end
+		if raw <= 0 then raw = parts[name .. "Ref"] or 1 end
 		f[name] = share / raw
 	end
 	s.calib = { f = f, ctx = ctx, x0 = x0, parts0 = parts, weights = GL.Specs.Weights(s.spec, s.mode, s.class) }

@@ -283,5 +283,132 @@ GL:SetSpec("PROT")
 check("a pick for the current talents is kept", GL.Character.SpecKey("PALADIN") == "PROT")
 C_SpecializationInfo, C_Traits = nil, nil
 
+---------------------------------------------------------------------------
+-- WoW Forever mechanics (wowsims/forever, 2026-11-25)
+---------------------------------------------------------------------------
+local function neck(id, stats, lines)
+	return T.Item(id, { name = "N", equipLoc = "INVTYPE_NECK", classID = 4, subclassID = 0, stats = stats or {}, lines = lines })
+end
+-- talents as the classic API reports them: { [name] = rank }
+local function talents(t)
+	if not t then GetNumTalentTabs, GetNumTalents, GetTalentInfo = nil, nil, nil return end
+	local list = {}
+	for name, rank in pairs(t) do list[#list + 1] = { name, rank } end
+	GetNumTalentTabs = function() return 1 end
+	GetNumTalents = function() return #list end
+	GetTalentInfo = function(_, i) return list[i][1], nil, 1, 1, list[i][2], 5 end
+end
+
+-- special attacks hit with one swing plus normalized attack power: a slow two-hander beats a fast one of the same dps
+T.Reset({ level = 60, class = "WARRIOR", className = "Warrior", stats = { 300, 120, 250, 30, 60 }, hp = 5000, ap = 900, crit = 20, hit = 6, armor = 5000 })
+GL.cdb.spec, GL.cdb.mode = "ARMS", "endgame"
+T.equipped[16] = T.Item("2h-mid", { name = "Axe", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 1,
+	stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 55 }, lines = { { leftText = "", rightText = "Speed 3.30" } } })
+local slow = T.Item("2h-slow", { name = "Slow", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 1,
+	stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 60 }, lines = { { leftText = "", rightText = "Speed 3.80" } } })
+local fast = T.Item("2h-fast", { name = "Fast", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 1,
+	stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 60 }, lines = { { leftText = "", rightText = "Speed 2.90" } } })
+local rSlow, rFast = rate(slow), rate(fast)
+check("arms 60: a slow two-hander beats a fast one of the same dps", rSlow.gain.total > rFast.gain.total + 1, pct(rSlow) .. " vs " .. pct(rFast))
+-- weapon skill counts for its own weapon type only
+local axeSkill = neck("n-axes", {}, { "Equip: Increased Two-Handed Axes +5." })
+local swordSkill = neck("n-swords", {}, { "Equip: Increased Two-Handed Swords +5." })
+check("weapon skill is read per weapon type", GL.Items.Get(axeSkill).stats.WSKILL_1 == 5 and not GL.Items.Get(axeSkill).effect)
+check("arms 60: +5 two-handed axes helps with an axe", rate(axeSkill).gain.total > 1, pct(rate(axeSkill)))
+check("arms 60: +5 two-handed swords does nothing with an axe", math.abs(rate(swordSkill).gain.total) < 0.01, pct(rate(swordSkill)))
+check("+1 Weapon Damage is read", GL.Items.Get(neck("n-wdmg", {}, { "Equip: +1 Weapon Damage." })).stats.WDMG == 1)
+GL.cdb.mode = nil
+
+-- Retribution: Champion of the Light turns Intellect into spell damage
+T.Reset({ level = 40, class = "PALADIN", className = "Paladin", stats = { 120, 60, 110, 90, 70 }, hp = 2200, mana = 2000, ap = 400, spAll = 40, crit = 8, scrit = 6, armor = 2500, regen = 10 })
+GL.cdb.spec = "RET"
+T.equipped[16] = T.Item("2h-ret40", { name = "2H", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 8, stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 40 } })
+local intNeck = neck("n-int", { ITEM_MOD_INTELLECT_SHORT = 10 })
+local plainInt = rate(intNeck).gain.total
+talents({ ["Champion of the Light"] = 5 })
+local cotlInt = rate(intNeck).gain.total
+check("ret 40: Champion of the Light 5/5 makes Intellect worth much more", cotlInt > plainInt * 2, ("%.2f%% -> %.2f%%"):format(plainInt, cotlInt))
+check("talents are read by name", (GL.Character:Get().talents["Champion of the Light"] or 0) == 5)
+talents(nil)
+
+-- feral: the paw hits with the weapon's dps, and Cat Form turns Agility into attack power
+T.Reset({ level = 40, class = "DRUID", className = "Druid", stats = { 80, 110, 100, 80, 70 }, hp = 2000, mana = 1500, ap = 500, crit = 12, armor = 1800, regen = 8 })
+GL.cdb.spec = "CAT"
+T.equipped[16] = T.Item("staff-old", { name = "Staff", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 10, stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 30 } })
+local staff = T.Item("staff-new", { name = "Staff", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 10, stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 38 } })
+check("cat 40: a better staff is an upgrade in form", rate(staff).gain.total > 2, pct(rate(staff)))
+local agiN, strN = neck("n-agi", { ITEM_MOD_AGILITY_SHORT = 10 }), neck("n-str", { ITEM_MOD_STRENGTH_SHORT = 10 })
+check("cat 40: Agility beats Strength (attack power and crit)", rate(agiN).gain.total > rate(strN).gain.total, pct(rate(agiN)) .. " vs " .. pct(rate(strN)))
+
+-- demonology: the demon grows with spell damage, more with Demonic Brand; Fire counts (Searing Pain, Immolate)
+T.Reset({ level = 39, class = "WARLOCK", className = "Warlock", stats = { 35, 40, 95, 130, 120 }, hp = 1600, mana = 2200, spAll = 60, scrit = 6, armor = 450, regen = 15 })
+GL.cdb.spec = "DEMO"
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+local s39 = GL.Character:Get()
+local x0 = GL.Model.Calibrate(s39).x0
+local ctx = GL.Model.Context(s39)
+local xMore = GL.Model.Apply(s39, x0, { { stats = { SP = 50 } } }, {})
+check("demo: the demon gains from spell damage", GL.Model.PetDPS(s39, xMore, ctx) > GL.Model.PetDPS(s39, x0, ctx))
+local spN = neck("n-sp", { ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = 10 })
+local noBrand = rate(spN).gain.total
+talents({ ["Demonic Brand"] = 3 })
+local withBrand = rate(spN).gain.total
+check("demo: Demonic Brand makes spell damage worth more", withBrand > noBrand, ("%.2f%% -> %.2f%%"):format(noBrand, withBrand))
+talents(nil)
+local fireN = neck("n-fire", {}, { "Equip: Increases damage done by Fire spells and effects by up to 10." })
+local shadowN2 = neck("n-shadow", {}, { "Equip: Increases damage done by Shadow spells and effects by up to 10." })
+check("demo: Fire damage counts (Searing Pain, Immolate)", rate(fireN).gain.total > 0.5 * rate(shadowN2).gain.total, pct(rate(fireN)) .. " vs " .. pct(rate(shadowN2)))
+-- the staff from the screenshot: +36 spell damage and 9 Spirit for +34 Shadow and +34 Fire is a small upgrade
+T.equipped[16] = T.Item("soranruk", { name = "Staff of Soran'ruk", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 10,
+	stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 15.7, ITEM_MOD_STAMINA_SHORT = 14 },
+	lines = { "Equip: Increases damage done by Fire spells and effects by up to 34.", "Equip: Increases damage done by Shadow spells and effects by up to 34." } })
+local channeler = T.Item("channeler", { name = "Spiritchaser Staff", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 10,
+	stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 25, ITEM_MOD_STAMINA_SHORT = 14, ITEM_MOD_SPIRIT_SHORT = 9 },
+	lines = { "Equip: Increases damage and healing done by magical spells and effects by up to 36." } })
+local rc = rate(channeler)
+check("demo 39: +2 spell damage and 9 Spirit over Soran'ruk is a small upgrade", rc.gain.total > 0 and rc.gain.total < 2, pct(rc))
+
+-- hunter pets take your crit, and a hawk takes the main hand's dps
+T.Reset({ level = 40, class = "HUNTER", className = "Hunter", stats = { 60, 140, 100, 70, 60 }, hp = 2000, mana = 1500, ap = 300, rap = 500, crit = 10, armor = 1500, regen = 8 })
+GL.cdb.spec = "BM"
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+local sh = GL.Character:Get()
+local xh0 = GL.Model.Calibrate(sh).x0
+local ctxh = GL.Model.Context(sh)
+check("hunter: the pet gains from your crit", GL.Model.PetDPS(sh, GL.Model.Apply(sh, xh0, { { stats = { CRIT = 3 } } }, {}), ctxh) > GL.Model.PetDPS(sh, xh0, ctxh))
+
+-- spell penetration: bonus damage even against mobs with no resistance
+T.Reset({ level = 40, class = "MAGE", className = "Mage", stats = { 30, 35, 80, 160, 120 }, hp = 1500, mana = 3000, spAll = 60, scrit = 8, armor = 400, regen = 14 })
+GL.cdb.spec = "FIRE"
+local pen = neck("n-pen", {}, { "Equip: Your spells pierce 10 Magical Resistance." })
+check("spell penetration is read, not an effect", GL.Items.Get(pen).stats.SPEN == 10 and not GL.Items.Get(pen).effect)
+check("fire mage 40: 10 spell penetration is an upgrade", rate(pen).gain.total > 0.5, pct(rate(pen)))
+-- wands roll the ranged table: spell hit does not help them
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+local sm = GL.Character:Get()
+local xm0 = GL.Model.Calibrate(sm).x0
+local wandX = GL.Model.Apply(sm, xm0, nil, nil, { ranged = { dps = 30, speed = 1.5, sub = 19, kind = "ranged" } })
+local p1 = GL.Model.Parts(sm, wandX, GL.Model.Context(sm)).wand
+local p2 = GL.Model.Parts(sm, GL.Model.Apply(sm, wandX, { { stats = { SHIT = 3 } } }, {}), GL.Model.Context(sm)).wand
+check("wands: spell hit does not change wand damage", math.abs(p1 - p2) < 1e-9)
+-- arcane mages cast Arcane Wrath from level 25: arcane damage beats frost damage
+GL.cdb.spec = "ARCANE"
+local arcN = neck("n-arc", {}, { "Equip: Increases damage done by Arcane spells and effects by up to 10." })
+local frostN = neck("n-frost", {}, { "Equip: Increases damage done by Frost spells and effects by up to 10." })
+check("arcane mage 40: Arcane Wrath, arcane damage beats frost damage", rate(arcN).gain.total > 2 * math.max(0, rate(frostN).gain.total), pct(rate(arcN)) .. " vs " .. pct(rate(frostN)))
+
+-- endgame tanks: defense also lowers a boss's crits
+T.Reset({ level = 60, class = "WARRIOR", className = "Warrior", stats = { 200, 100, 300, 30, 60 }, hp = 6000, ap = 600, crit = 8, armor = 8000, dodge = 10, parry = 10, block = 10, blockval = 100 })
+GL.cdb.spec, GL.cdb.mode = "PROT", "endgame"
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+local st60 = GL.Character:Get()
+local xt0 = GL.Model.Calibrate(st60).x0
+local ctxT = GL.Model.Context(st60)
+local defX = GL.Model.Apply(st60, xt0, { { stats = { DEF = 20 } } }, {})
+local ctxL = { d = 0, front = true, attacker = 60 }
+check("prot 60: defense lowers boss crits on top of avoidance",
+	GL.Model.Survival(st60, defX, ctxT) / GL.Model.Survival(st60, xt0, ctxT) > GL.Model.Survival(st60, defX, ctxL) / GL.Model.Survival(st60, xt0, ctxL) + 0.001)
+GL.cdb.mode = nil
+
 print(("%d checks, %d failed"):format(n, fails))
 os.exit(fails == 0 and 0 or 1)

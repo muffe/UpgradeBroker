@@ -2,6 +2,8 @@
 -- tools/import-record.lua) instead of made-up items: real links, tooltips, auction rows and characters. Checks
 -- that the offline rating matches the game's, that every saved character gets plausible upgrades, and that a full
 -- scan stays within frame, time and memory budgets.
+-- UB_REBASELINE=1 lua5.1 tests/replay.lua: after a deliberate model change, takes this code's ratings as the new
+-- reference and writes them into the fixture (until the next /ub record brings the game's own again).
 -- the recording, unpacked (tools/import-record.lua writes both; the repository keeps only the .gz)
 local path = arg[1] or "tests/fixtures/forever.lua"
 local rec
@@ -367,11 +369,12 @@ end
 -- Same answers as the game
 ---------------------------------------------------------------------------
 -- the recording rated every scan item for every character whose gear was there, the way the game saw them
+local REBASELINE = os.getenv("UB_REBASELINE") == "1"
 local goldNames = {}
 for name in pairs(rec.golden or {}) do goldNames[#goldNames + 1] = name end
 table.sort(goldNames)
 for _, who in ipairs(goldNames) do
-try("ratings match the game's for " .. who, function()
+try(("ratings match the %s for %s"):format(rec.goldenSource or "game's", who), function()
 	Fresh()
 	GL:SetViewing(who)
 	RunFrames()
@@ -385,6 +388,7 @@ try("ratings match the game's for " .. who, function()
 			-- tooltips are red for what the recording character can't use; saved characters skip that line
 			if not (want[1] == "no" and want[2] == "blocked") then
 				local link = LinkOf(k)
+				if REBASELINE then rec.golden[who][k] = GL.Record.Golden(link, s) or g end
 				local reject = GL.Compare.QuickReject(s, link)
 				local res = not reject and GL.Compare:Rate(link, s)
 				local got
@@ -399,7 +403,7 @@ try("ratings match the game's for " .. who, function()
 				elseif same then
 					same = got[2] == want[2]
 				end
-				if not same then
+				if not same and not REBASELINE then
 					diff[#diff + 1] = ("%s: game %s %s, here %s %s"):format(link:match("%[(.-)%]") or k, tostring(want[1]),
 						tostring(want[2]), tostring(got[1]), tostring(got[2]))
 				end
@@ -409,6 +413,14 @@ try("ratings match the game's for " .. who, function()
 	assert(compared > 0, "nothing to compare")
 	assert(#diff == 0, ("%d of %d differ:\n     %s"):format(#diff, compared, table.concat(diff, "\n     ", 1, math.min(5, #diff))))
 end)
+end
+
+-- written before the tests below, which change the saved characters the recording shares with the addon
+if REBASELINE then
+	rec.goldenSource = "model's reference"
+	local out = path:gsub("%.gz$", "")
+	dofile("tools/fixture.lua").Write(rec, out)
+	print("new reference ratings written to " .. out .. " and .gz")
 end
 
 ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@
 --   DEF DODGE PARRY BLOCK BLOCKVAL tank stats (defense in skill points)
 --   MP5 HP5                        regeneration
 --   DPS SPEED                      weapon damage per second and speed
+--   SPEN WDMG WSKILL_<subclass>    spell penetration, flat weapon damage, weapon skill for one weapon type
 -- WoW Forever's GetItemStats reports percent stats as ratings (1% crit = 14), so they are read from the
 -- tooltip where it says "... by 1%" and only converted from the rating when the tooltip can't be read.
 local _, GL = ...
@@ -34,6 +35,15 @@ local STAT_KEYS = {
 	HIT = "HIT", HIT_MELEE = "HIT", HIT_RANGED = "HIT", HIT_SPELL = "SHIT",
 	HASTE = "HASTE", SPELL_HASTE = "HASTE", EXPERTISE = "EXP",
 	DEFENSE_SKILL = "DEF", DODGE = "DODGE", PARRY = "PARRY", BLOCK = "BLOCK", BLOCK_VALUE = "BLOCKVAL",
+	SPELL_PENETRATION = "SPEN",
+}
+
+-- Weapon skill lines ("Equip: Increased Two-Handed Axes +2."): the skill name and the item subclass it is for.
+-- Stored as WSKILL_<subclass>.
+local WEAPON_SKILLS = {
+	["axes"] = 0, ["two-handed axes"] = 1, ["bows"] = 2, ["guns"] = 3, ["maces"] = 4, ["two-handed maces"] = 5,
+	["polearms"] = 6, ["swords"] = 7, ["two-handed swords"] = 8, ["staves"] = 10, ["fist weapons"] = 13,
+	["daggers"] = 15, ["thrown"] = 16, ["crossbows"] = 18,
 }
 
 local function KeyOf(blizzKey)
@@ -74,6 +84,8 @@ local FLAT_RULES = {
 	{ "restores (%d+) mana per 5 sec", "MP5" },
 	{ "(%d+) mana per 5 sec", "MP5" },
 	{ "restores (%d+) health per 5 sec", "HP5" },
+	{ "spells pierce (%d+) magical resistance", "SPEN" },
+	{ "%+(%d+) weapon damage", "WDMG" },
 	{ "%+(%d+) attack power in cat, bear", "FAP" },
 	{ "attack power by (%d+) in cat, bear", "FAP" },
 	{ "%+(%d+) ranged attack power", "RAP" },
@@ -135,6 +147,11 @@ local function ReadTooltip(link, out, meta)
 						local v = tonumber(t:match("damage done by " .. school:lower() .. " spells and effects by up to (%d+)"))
 						if v then flat["SP_" .. school] = (flat["SP_" .. school] or 0) + v; matched = true break end
 					end
+				end
+				if not matched then
+					local skill, v = t:match("^equip: increased ([%a%- ]+) %+(%d+)")
+					local sub = skill and WEAPON_SKILLS[skill]
+					if sub then flat["WSKILL_" .. sub] = (flat["WSKILL_" .. sub] or 0) + tonumber(v); matched = true end
 				end
 				if not matched then
 					for _, r in ipairs(FLAT_RULES) do
@@ -256,8 +273,11 @@ Items.LABELS = {
 	HASTE = "Haste", MHASTE = "Attack Speed", EXP = "Expertise", DEF = "Defense", DODGE = "Dodge", PARRY = "Parry",
 	BLOCK = "Block", BLOCKVAL = "Block Value", MP5 = "Mana/5s", HP5 = "Health/5s", DPS = "Weapon DPS",
 	SP_HOLY = "Holy Damage", SP_FIRE = "Fire Damage", SP_NATURE = "Nature Damage", SP_FROST = "Frost Damage",
-	SP_SHADOW = "Shadow Damage", SP_ARCANE = "Arcane Damage",
+	SP_SHADOW = "Shadow Damage", SP_ARCANE = "Arcane Damage", SPEN = "Spell Penetration", WDMG = "Weapon Damage",
 }
+for name, sub in pairs(WEAPON_SKILLS) do
+	Items.LABELS["WSKILL_" .. sub] = name:gsub("(%a)(%a*)", function(a, b) return a:upper() .. b end) .. " Skill"
+end
 Items.PERCENT = { CRIT = true, SCRIT = true, HIT = true, SHIT = true, HASTE = true, MHASTE = true, EXP = true,
 	DODGE = true, PARRY = true, BLOCK = true }
 Items.SCHOOLS = SCHOOLS
