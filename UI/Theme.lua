@@ -26,14 +26,20 @@ T.C = {
 	accent  = { 0.86, 0.65, 0.50 },          -- #DCA77F, EllesmereUI's WoW Forever default
 }
 
-T.FONT = MEDIA .. "fonts\\Expressway.TTF"
+-- EllesmereUI's fonts by its own names (it renames the files between versions), else Blizzard's. A missing
+-- file is a chat error on SetFont, so never guess a path.
+local function EuiFont(name)
+	local file = EllesmereUI and EllesmereUI.FONT_FILES and EllesmereUI.FONT_FILES[name]
+	return file and (MEDIA .. "fonts\\" .. file) or STANDARD_TEXT_FONT
+end
+T.FONT = EuiFont("Expressway")
+T.FONT_BOLD = EuiFont("Expressway Bold")
 -- EllesmereUI's down arrow, else Blizzard's
 T.ARROW_DOWN = (C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUI"))
 	and (MEDIA .. "icons\\eui-arrow-down3.png") or "Interface\\Buttons\\Arrow-Down-Up"
 -- EllesmereUI's gear icon, else Blizzard's
 T.GEAR = (C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUI"))
 	and (MEDIA .. "icons\\settings.png") or "Interface\\Buttons\\UI-OptionsButton"
-T.FONT_BOLD = MEDIA .. "fonts\\Expressway Bold.ttf"
 
 local accentWatchers = {}
 -- fn(r, g, b) now and whenever the accent changes.
