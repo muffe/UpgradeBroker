@@ -13,7 +13,9 @@
 -- critY: special attack crit damage (2.0 base; Impale and Lethality add 0.2, Mortal Shots 0.3); critR: auto shot
 -- crit damage (Mortal Shots). meleeSpells: the spell part rolls the melee table and crits double (paladin seals).
 -- filler / heal: the spell whose rank at your level (Data/Leveling.lua, WoW Forever game data) sets the base
--- damage or healing and the spell power coefficient of the spell part.
+-- damage or healing and the spell power coefficient of the spell part. dots: damage over time put on each mob
+-- before the filler, in this order, where it beats the filler (Model.Rotation); talent = only with the talent.
+-- schools: the filler's (a dot has its own).
 -- Levelling time model (Model.LevelCycle): manaUse = mana spent while fighting as a share of casting manaSpell
 -- nonstop (melee and hunter specs; casters spend their spell share); petTank = share of a mob's damage that
 -- reaches you because a pet holds it (voidwalker, hunter pet). Both are estimates.
@@ -85,13 +87,13 @@ S.list = {
 			comps = { level = { heal = 0.6, spell = 0.25, wand = 0.15 }, endgame = { heal = 1 } }, schools = { HOLY = 0.6, SHADOW = 0.4 } },
 		spec { key = "HOLY", name = "Holy", role = "healer", critMult = 1.5, filler = "Smite", heal = { "Greater Heal", "Heal", "Lesser Heal" },
 			comps = { level = { heal = 0.6, spell = 0.25, wand = 0.15 }, endgame = { heal = 1 } }, schools = { HOLY = 1 } },
-		spec { key = "SHADOW", name = "Shadow", role = "dps", critMult = 1.5, filler = "Smite", schools = { SHADOW = 1 },
-			-- Smite only until Shadow Word: Pain (level 4), mostly Smite until Mind Flay (level 20)
-			schoolsBelow = { { level = 4, schools = { HOLY = 1 } }, { level = 20, schools = { HOLY = 0.6, SHADOW = 0.4 } } },
+		-- Smite until Mind Flay (level 20)
+		spec { key = "SHADOW", name = "Shadow", role = "dps", critMult = 1.5, filler = "Mind Flay", schools = { SHADOW = 1 },
+			dots = { "Shadow Word: Pain" },
 			comps = { level = { spell = 0.8, wand = 0.2 }, endgame = { spell = 1 } } },
 	},
 	SHAMAN = {
-		spec { key = "ELE", name = "Elemental", role = "dps", critMult = 2.0, filler = "Lightning Bolt", schools = { NATURE = 0.75, FIRE = 0.25 },
+		spec { key = "ELE", name = "Elemental", role = "dps", critMult = 2.0, filler = "Lightning Bolt", schools = { NATURE = 1 }, dots = { "Flame Shock" },
 			comps = { level = { spell = 0.85, white = 0.15 }, endgame = { spell = 1 } } },
 		spec { key = "ENH", name = "Enhancement", role = "dps", critY = 2.0, critMult = 1.5, manaUse = 0.3, manaSpell = "Lightning Bolt", schools = { NATURE = 0.6, FIRE = 0.4 },
 			hybridSP = HYBRID_SP.SHAMAN,
@@ -109,14 +111,18 @@ S.list = {
 	},
 	WARLOCK = {
 		spec { key = "AFFLI", name = "Affliction", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 1.2, schools = { SHADOW = 1 }, lifeTap = true,
+			dots = { "Corruption", "Bane of Agony", { "Siphon Life", talent = true }, "Immolate" },
 			comps = { level = { spell = 0.65, pet = 0.2, wand = 0.15 }, endgame = { spell = 0.85, pet = 0.15 } } },
-		spec { key = "DEMO", name = "Demonology", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 1.5, schools = { SHADOW = 0.6, FIRE = 0.4 }, lifeTap = true,
+		-- Searing Pain about every 12 s for Demonic Brand, Shadow Bolt between
+		spec { key = "DEMO", name = "Demonology", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 1.5, schools = { SHADOW = 0.85, FIRE = 0.15 }, lifeTap = true,
+			dots = { "Corruption", "Bane of Agony", "Immolate" },
 			comps = { level = { spell = 0.5, pet = 0.38, wand = 0.12 }, endgame = { spell = 0.75, pet = 0.25 } } },
-		spec { key = "DESTRO", name = "Destruction", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 2.0, schools = { SHADOW = 0.6, FIRE = 0.4 }, lifeTap = true,
+		spec { key = "DESTRO", name = "Destruction", role = "dps", filler = "Shadow Bolt", petTank = 0.35, critMult = 2.0, schools = { SHADOW = 0.85, FIRE = 0.15 }, lifeTap = true,
+			dots = { "Immolate", "Corruption", "Bane of Agony" },
 			comps = { level = { spell = 0.72, pet = 0.18, wand = 0.1 }, endgame = { spell = 0.9, pet = 0.1 } } },
 	},
 	DRUID = {
-		spec { key = "BALANCE", name = "Balance", role = "dps", critMult = 2.0, filler = "Wrath", schools = { ARCANE = 0.6, NATURE = 0.4 },
+		spec { key = "BALANCE", name = "Balance", role = "dps", critMult = 2.0, filler = "Wrath", schools = { ARCANE = 0.6, NATURE = 0.4 }, dots = { "Moonfire" },
 			comps = { level = { spell = 1 }, endgame = { spell = 1 } } },
 		spec { key = "CAT", name = "Feral (Cat)", role = "dps", critY = 2.0, form = true, formLevel = 20,
 			comps = { level = { white = 0.5, yellow = 0.5 }, endgame = { white = 0.45, yellow = 0.55 } } },

@@ -357,7 +357,38 @@ check("demo: Demonic Brand makes spell damage worth more", withBrand > noBrand, 
 talents(nil)
 local fireN = neck("n-fire", {}, { "Equip: Increases damage done by Fire spells and effects by up to 10." })
 local shadowN2 = neck("n-shadow", {}, { "Equip: Increases damage done by Shadow spells and effects by up to 10." })
-check("demo: Fire damage counts (Searing Pain, Immolate)", rate(fireN).gain.total > 0.5 * rate(shadowN2).gain.total, pct(rate(fireN)) .. " vs " .. pct(rate(shadowN2)))
+check("demo: Fire damage counts (Searing Pain, Immolate)", rate(fireN).gain.total > 0.2 * rate(shadowN2).gain.total, pct(rate(fireN)) .. " vs " .. pct(rate(shadowN2)))
+check("demo: Shadow damage beats Fire (Shadow Bolt, Corruption, Bane of Agony)", rate(shadowN2).gain.total > rate(fireN).gain.total)
+
+-- damage over time: Corruption, Bane of Agony and Immolate go on each mob before Shadow Bolt, each counting the
+-- ticks before the mob dies
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+local sDot = GL.Character:Get()
+GL.Model.Calibrate(sDot)
+local function dotDamage(rot)
+	local d = 0
+	for _, t in ipairs(rot.terms) do d = d + t.base end
+	return d
+end
+-- the filler's two schools (Shadow Bolt, Searing Pain) and three dots
+check("demo 39: three dots before Shadow Bolt", #sDot.rot.terms == 5, #sDot.rot.terms .. " terms")
+check("demo 39: dots do more per second of casting than Shadow Bolt alone",
+	dotDamage(sDot.rot) > 1.3 * GL.Model.SpellRank("Shadow Bolt", 39) / 3, ("%.1f"):format(dotDamage(sDot.rot)))
+check("demo 39: a mob that dies sooner gets fewer ticks", dotDamage(GL.Model.Rotation(sDot, 8)) < dotDamage(GL.Model.Rotation(sDot, 40)))
+check("demo 39: the fight length settles near the kill cycle's", math.abs(sDot.rot.fight - GL.Model.LevelCycle(sDot, sDot.calib.x0, sDot.base).fight) < 2,
+	("%.1f s"):format(sDot.rot.fight))
+GL.cdb.spec = "AFFLI"
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+local rotAffli = GL.Model.Rotation(GL.Character:Get(), 30)
+local nAffli = #rotAffli.terms
+talents({ ["Siphon Life"] = 1 })
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+check("affliction 39: Siphon Life only with the talent", #GL.Model.Rotation(GL.Character:Get(), 30).terms == nAffli + 1)
+talents({ ["Improved Corruption"] = 5 })
+GL.Character:Invalidate(); GL.Compare:ClearCache()
+check("affliction 39: Improved Corruption leaves more time to cast", dotDamage(GL.Model.Rotation(GL.Character:Get(), 30)) > dotDamage(rotAffli))
+talents(nil)
+GL.cdb.spec = "DEMO"
 -- the staff from the screenshot: +36 spell damage and 9 Spirit for +34 Shadow and +34 Fire is a small upgrade
 T.equipped[16] = T.Item("soranruk", { name = "Staff of Soran'ruk", equipLoc = "INVTYPE_2HWEAPON", classID = 2, subclassID = 10,
 	stats = { ITEM_MOD_DAMAGE_PER_SECOND_SHORT = 15.7, ITEM_MOD_STAMINA_SHORT = 14 },

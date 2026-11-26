@@ -343,7 +343,7 @@ function Character:Save()
 		-- this character's own choices win; one made from another character is kept until it sets its own
 		-- the spec this character plays now; a pick made for it from another character ends with this login
 		specKey = s.spec.key, spec = nil, mode = GL.cdb.mode or old.mode, stats = Copy(s.stats), conv = Copy(s.conv),
-		canDualWield = s.canDualWield, skills = s.skills, equipped = {}, bagWeapons = Character.BagWeaponLinks() }
+		talents = s.talents and Copy(s.talents), canDualWield = s.canDualWield, skills = s.skills, equipped = {}, bagWeapons = Character.BagWeaponLinks() }
 	for slot, item in pairs(s.equipped) do d.equipped[slot] = item.link end
 	realm[name] = d
 end
@@ -407,6 +407,7 @@ function Character.FromSaved(d)
 	local s = { class = d.class, classLocal = d.classLocal, level = d.level, spec = spec,
 		mode = d.mode or (d.level >= 60 and "endgame" or "level"), equipped = {}, incomplete = false,
 		isAlt = true, altName = d.name, stats = Copy(d.stats), conv = Copy(d.conv), canDualWield = d.canDualWield,
+		talents = d.talents and Copy(d.talents),
 		bagWeaponLinks = d.bagWeapons or {}, skills = d.skills }
 	for slot, link in pairs(d.equipped or {}) do
 		local item = GL.Items.Get(link)

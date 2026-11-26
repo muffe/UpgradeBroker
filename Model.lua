@@ -97,21 +97,84 @@ end
 
 -- The filler a character can cast: the spec's, else the class's first damage spell (a level 1 frost mage
 -- has Fireball, not Frostbolt yet).
--- A spec's schools while it still lacks its main spells (Data/Specs.lua schoolsBelow: bands by level).
-function Model.SchoolsBelow(spec, level)
-	for _, band in ipairs(spec.schoolsBelow or {}) do
-		if level < band.level then return band.schools end
-	end
-end
-
 Model.SPELL_SCHOOL = { Fireball = "FIRE", Frostbolt = "FROST", ["Shadow Bolt"] = "SHADOW", Smite = "HOLY",
-	["Lightning Bolt"] = "NATURE", Wrath = "NATURE" }
+	["Lightning Bolt"] = "NATURE", Wrath = "NATURE", ["Mind Flay"] = "SHADOW" }
 local FALLBACK = { MAGE = "Fireball", WARLOCK = "Shadow Bolt", PRIEST = "Smite", SHAMAN = "Lightning Bolt", DRUID = "Wrath" }
 function Model.Filler(s)
 	if not s.spec.filler then return nil end -- melee hybrids: their spells are not a filler (seals, shocks)
 	if Model.SpellRank(s.spec.filler, s.level) then return s.spec.filler end
 	local alt = FALLBACK[s.class]
 	if alt and Model.SpellRank(alt, s.level) then return alt end
+end
+
+-- A damage over time spell's highest rank at a level (Data/Leveling.lua): { direct, its coefficient, all ticks,
+-- their coefficient, duration, mana, cast seconds }, and its school. nil before you learn it.
+function Model.DotRank(name, level)
+	local ranks = GL.LevelingData and GL.LevelingData.dots and GL.LevelingData.dots[name]
+	if not ranks then return nil end
+	for l = min(60, math.floor(level)), 1, -1 do
+		if ranks[l] then return ranks[l], ranks.school end
+	end
+end
+
+-- Talents that shorten a cast: Improved Corruption, 0.4 s a rank.
+local CAST_TALENTS = { Corruption = { "Improved Corruption", 0.4 } }
+
+-- What a caster casts on a mob, per second of casting: terms { school, base, coef } (base damage and spell
+-- damage coefficient) and mana. fight: how long a mob lives (levelling), nil for a boss, on which every dot
+-- stays up. The spec's dots go on first, in its order, each while it beats the filler per second of casting
+-- at your spell damage now; a dot on a mob counts only the ticks before it dies. The filler fills the rest.
+-- nil for melee hybrids (no filler).
+function Model.Rotation(s, fight)
+	local level, spec = s.level, s.spec
+	local filler = Model.Filler(s)
+	local avg, mana, cast, coef = Model.SpellRank(filler, level)
+	if not avg then return nil end
+	local schools = (filler ~= spec.filler and { [Model.SPELL_SCHOOL[filler] or "SHADOW"] = 1 }) or spec.schools or { SHADOW = 1 }
+	local stats = s.stats or {}
+	local function SP(school) return stats["SP_" .. school] or 0 end
+	local fillerRate = 0
+	for school, share in pairs(schools) do fillerRate = fillerRate + share * (avg + SP(school) * coef) / cast end
+	-- seconds of casting: on a mob, your share of the fight not spent wanding or swinging; on a boss, per second
+	local comps = Model.Comps(s)
+	local own = (comps.spell or 0) + (comps.wand or 0) + (comps.white or 0) + (comps.ranged or 0)
+	local castShare = own > 0 and (comps.spell or 0) / own or 1
+	local C = fight and fight * castShare or castShare
+	local terms, manaSum, used = {}, 0, 0
+	for _, e in ipairs(spec.dots or {}) do
+		local name = type(e) == "table" and e[1] or e
+		local r, school = Model.DotRank(name, level)
+		local talented = type(e) ~= "table" or not e.talent or ((s.talents or {})[name] or 0) > 0
+		if r and talented then
+			local ct = r[7]
+			local t = CAST_TALENTS[name]
+			if t then ct = ct - t[2] * ((s.talents or {})[t[1]] or 0) end
+			local gcd = max(1.5, ct)
+			-- on a mob: the ticks before it dies; on a boss: kept up, one cast per duration
+			local frac = fight and max(0, min(1, (fight - used - gcd) / r[5])) or 1
+			local per = fight and 1 or 1 / r[5]
+			local base, k = (r[1] + r[3] * frac) * per, (r[2] + r[4] * frac) * per
+			local time = gcd * per
+			if used + time <= C and (base + SP(school) * k) / time > fillerRate then
+				terms[#terms + 1] = { school = school, base = base, coef = k }
+				manaSum = manaSum + r[6] * per
+				used = used + time
+			end
+		end
+	end
+	local left = C - used
+	for school, share in pairs(schools) do
+		terms[#terms + 1] = { school = school, base = share * avg / cast * left, coef = share * coef / cast * left }
+	end
+	manaSum = manaSum + mana / cast * left
+	for _, t in ipairs(terms) do t.base, t.coef = t.base / C, t.coef / C end
+	return { terms = terms, mana = manaSum / C, fight = fight }
+end
+
+-- The rotation the model rates with (Calibrate settles the fight length for levelling).
+function Model.Rot(s)
+	if s.rot == nil then s.rot = Model.Rotation(s, s.mode == "level" and 20 or nil) or false end
+	return s.rot or nil
 end
 
 function Model.FromSnapshot(s)
@@ -340,20 +403,18 @@ function Model.Parts(s, x, ctx)
 		end
 	end
 	if comps.spell then
-		-- per second of casting the spec's filler at its rank for your level (WoW Forever game data);
-		-- specs without one (paladin seals, shaman weapons and shocks) use a level curve, scaled per spec
-		-- (hybridSP) so spell damage weighs against attack power as in wowsims/forever's stat weights
-		local base, coef
-		local avg, _, cast, c = Model.SpellRank(Model.Filler(s), level)
-		if avg then base, coef = avg / cast, c / cast
-		else base, coef = Model.SpellBase(level), Model.SpellCoef(level) * (spec.hybridSP or 1) end
-		-- the schools: the spec's, or the fallback spell's own (a level 1 frost mage's Fireball is Fire)
-		local filler = Model.Filler(s)
-		local schools = (filler and filler ~= spec.filler and { [Model.SPELL_SCHOOL[filler] or "SHADOW"] = 1 })
-			or Model.SchoolsBelow(spec, level) or spec.schools or { SHADOW = 1 }
+		-- per second of casting your dots and filler at their ranks for your level (WoW Forever game data,
+		-- Model.Rotation); specs without a filler (paladin seals, shaman weapons and shocks) use a level curve,
+		-- scaled per spec (hybridSP) so spell damage weighs against attack power as in wowsims/forever's weights
 		local sum = 0
-		for school, share in pairs(schools) do
-			sum = sum + share * (base + (x["SP_" .. school] or 0) * coef)
+		local rot = Model.Rot(s)
+		if rot then
+			for _, t in ipairs(rot.terms) do sum = sum + t.base + (x["SP_" .. t.school] or 0) * t.coef end
+		else
+			local base, coef = Model.SpellBase(level), Model.SpellCoef(level) * (spec.hybridSP or 1)
+			for school, share in pairs(spec.schools or { SHADOW = 1 }) do
+				sum = sum + share * (base + (x["SP_" .. school] or 0) * coef)
+			end
 		end
 		sum = sum * (1 + Model.PenBonus(x.SPEN, level))
 		if spec.meleeSpells then
@@ -424,6 +485,20 @@ function Model.Calibrate(s)
 	if s.calib then return s.calib end
 	local ctx = Model.Context(s)
 	local x0 = Model.FromSnapshot(s)
+	-- levelling with dots: how much of each dot ticks depends on how long a mob lives, which depends on the
+	-- dots. A few rounds settle it; the fight length then stays fixed for every item.
+	s.rot = nil
+	if s.mode == "level" and s.spec.dots and GL.LevelingData then
+		local hp = Model.Creature(s.level)
+		local fight = 20
+		for _ = 1, 4 do
+			s.rot = Model.Rotation(s, fight) or false
+			local dps = Model.AbsDPS(s, Model.Parts(s, x0, ctx))
+			if not dps then break end
+			fight = hp / max(0.1, dps)
+		end
+		s.rot = Model.Rotation(s, fight) or false
+	end
 	local parts = Model.Parts(s, x0, ctx)
 	local comps = Model.Comps(s)
 	local f = {}
@@ -557,9 +632,10 @@ function Model.LevelCycle(s, x, n)
 	if GL.Classes.stats[s.class].mana then
 		local name = filler or spec.manaSpell or spec.heal
 		local _, cost, cast = Model.SpellRank(name, L)
+		local rot = filler and Model.Rot(s)
 		if cost then
 			local share = filler and ((comps.spell or 0) + (comps.heal or 0)) or (spec.manaUse or 0.3)
-			manaSpent = cost / cast * share * fight
+			manaSpent = (rot and rot.mana or cost / cast) * share * fight
 		end
 		manaSpent = math.max(0, manaSpent - (x.REGEN_IC or 0) * fight - (x.REGEN_OOC or 0) * Model.TRAVEL)
 	end

@@ -15,10 +15,15 @@ gain   = (time per kill before / after) x (effective health after / before) ^ 0.
 ```
 
 - **health lost** = mob DPS x (1 - your armor reduction) x (1 - avoidance) x pet share x fight.
-- **mana spent** = filler mana per second x share of the fight spent casting x fight, minus regeneration while
-  fighting and while walking.
+- **mana spent** = mana per second of casting your rotation x share of the fight spent casting x fight, minus
+  regeneration while fighting and while walking.
 - **your damage per second** in absolute numbers comes from the part with a real size (auto attacks, auto shot or
-  the filler spell) divided by its share of your damage (`Specs.lua`); physical damage goes through the mob's armor.
+  your spells) divided by its share of your damage (`Specs.lua`); physical damage goes through the mob's armor.
+- **your spells** (`Model.Rotation`): the spec's damage over time spells go on each mob first, in its order, each
+  only while it does more per second of casting than the filler; a dot counts the ticks before the mob dies. The
+  rest of the casting time goes to the filler. How long a mob lives depends on the dots and the dots on how long it
+  lives, so a few rounds settle the fight length at your current gear; it then stays fixed for every item. On a boss
+  every dot stays up.
 
 ## Sources (WoW Forever game data unless noted)
 
@@ -28,10 +33,12 @@ gain   = (time per kill before / after) x (effective health after / before) ^ 0.
 | Armor reduction | armor / (armor + 400 + 85 x level) | `ExpectedStat.ArmorConstant` (same numbers) |
 | Food and water per second by required level | e.g. level 35: 46.4 HP/s, 66.4 mana/s | ItemEffect + SpellEffect auras 84/85, wago.tools; same totals as Classic Era |
 | Filler rank per level: base damage, mana, cast time, spell power coefficient | e.g. Shadow Bolt at 35: 84 dmg, 160 mana, 3.0 s, 0.857 | SpellLevels, SpellPower, SpellCastTimes, SpellEffect, wago.tools. Forever cut base damage of most fillers to 50-90 % of Classic Era (Shadow Bolt 84 vs 160 at 35) |
+| Damage over time per level: ticks, duration, spell damage coefficient, mana, cast time | e.g. level 38: Corruption 6 x 28 over 18 s, 120 % (20 % a tick), 160 mana, 2 s cast; Bane of Agony 12 x 21 over 24 s, 160 %, 130 mana; Immolate 64 + 5 x 19 over 15 s, 20 % + 65 % | SpellEffect (periodic auras), SpellDuration, SpellPower, SpellCastTimes, wago.tools. Ticks can crit (wowsims/forever `warlock/corruption.go`) |
 | Spirit mana regeneration | 6.25 + Spirit / 8 per second | wowsims/forever `sim/core/mana.go` (no level term); the game's own value is used when the client reports it |
 | Combat table (miss, dodge, parry, glancing, crit suppression, weapon skill) | | wowsims/forever `sim/core/target.go` |
 | Special attacks | one swing + attack power x normalized speed / 14 (dagger 1.7, one-hander 2.4, two-hander 3.3, ranged 2.8) | wowsims/forever `sim/core/attack.go` |
 | Spell penetration | bonus damage P / (P + 8 x level + 19), none under 1 % | wowsims/forever `sim/core/spell_resistances.go`, measured (EV-0142) |
+| Talents in the rotation | Siphon Life only with the talent; Improved Corruption takes 0.4 s a rank off Corruption's cast | ranks from the client |
 | Talents that turn one stat into another | Champion of the Light, Mental Dexterity, Mental Quickness, Careful Aim, Spiritual Guidance, Arcane Charges, Cat Form | talent rows as wowsims/forever reads them; ranks from the client |
 | What pets take from you | demons: 17 % of spell damage as attack power, Demonic Brand 0.078 x spell damage; hunter pets: 10 % of attack power, your crit, hit and expertise; hawks: 80 % of (ranged AP + 14 x main-hand dps) | wowsims/forever `sim/warlock/pets.go`, `sim/hunter/pets.go`, `summon_hawk.go` |
 | Feral paw | the weapon's dps at the form's speed (cat 1.0, bear 2.5) | wowsims/forever `sim/druid/forms.go` (EV-0041) |
@@ -52,16 +59,18 @@ Generator: `tools/gen_leveling.py` (CSV exports from wago.tools).
 | Demonic Brand | half of a demon's hits branded at 3/3 (a Searing Pain every 12 s) | how much the brand adds to spell damage |
 | Arcane Charges | 2 on average while leveling, 3.5 on a boss | Intellect for Arcane mages |
 | Melee hybrids' spell part | level curve, spell damage scaled to wowsims/forever's level 60 weights (Retribution 2, Enhancement 1.3 a point of attack power) | spell damage for paladins and enhancement shamans |
-| Demonology schools | 60 % Shadow, 40 % Fire (Searing Pain for Demonic Brand, Immolate) | Shadow against Fire gear |
+| Demonology and Destruction filler | 85 % Shadow Bolt, 15 % Searing Pain (Demonic Brand); Immolate counts as Fire on its own | Shadow against Fire gear |
+| Share of the fight spent casting | the spell share of what you do yourself (spell / (spell + wand + melee) in `Specs.lua`), e.g. 81 % for a Demonology warlock | how many filler casts follow the dots |
+| Which dots each spec uses | Warlock: Corruption, Bane of Agony, Immolate (Affliction also Siphon Life); Shadow priest: Shadow Word: Pain; Balance: Moonfire; Elemental: Flame Shock | the base damage and coefficient of the spell part |
 
-Known gaps: only the filler spell counts for casters (no DoTs, Moonfire or Mind Blast), so classes that live on
-DoTs (Balance druids with Forever's weak Wrath, Affliction) get longer fights than in game. This changes how much
-resting weighs against fighting, not which stat helps more. Spell availability follows the data: a level 1 Frost
-mage uses Fireball until Frostbolt (level 4); priests heal with Lesser Heal, Heal or Greater Heal by level.
+Known gaps: spells on a cooldown and channels besides Mind Flay are left out (Mind Blast, Drain Life, Drain Soul,
+Insect Swarm, Starfire), and the dot order is fixed per spec. Spell availability follows the data: a level 1 Frost
+mage uses Fireball until Frostbolt (level 4), a Shadow priest Smite until Mind Flay (level 20); priests heal with
+Lesser Heal, Heal or Greater Heal by level.
 
 Community reports agree in direction (anecdotal, forums and guides): warriors eat after most pulls, warlocks and
 hunters have the least downtime, mages drink most. The model gives, for example, rest per kill of 10 s for a
-level 20 warrior (fight 21 s) and 6 s for a level 35 Demonology warlock (fight 24 s).
+level 20 warrior (fight 21 s) and 6 s for a level 35 Demonology warlock (fight 21 s).
 
 ## What it means for stats while leveling
 
@@ -69,13 +78,10 @@ Example numbers from `tests/` characters (+10 of a stat on an empty slot):
 
 | Character | +10 main stat | +10 Stamina | +10 Intellect | +10 Spirit | +100 Armor |
 |---|---|---|---|---|---|
-| Warlock 35 Demonology | +3.8 % (spell damage, demon included) | +0.45 % | +0.27 % | +0.21 % | |
+| Warlock 35 Demonology | +3.1 % (spell damage, demon included) | +0.45 % | +0.26 % | +0.29 % | |
 | Paladin 25 Retribution | +3.0 % (Strength) | +0.77 % | +0.50 % | +0.30 % | +0.61 % |
 | Warrior 20 Arms | +5.4 % (Strength) | +1.2 % | | | +1.1 % |
 
 Stamina is worth much less than in fixed stat weights: at a steady pace you eat back what you lose, so a bigger
 pool only saves sitting down and makes bad pulls survivable. Spell damage is worth a lot because Forever lowered
 the base damage of caster spells, so each point of spell damage is a larger share of a cast.
-
-Shadow priests from level 20 are modelled with Smite's damage, mana and cast time but Shadow school, since Mind
-Flay is not in the generated spell table.
